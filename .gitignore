@@ -9,3 +9,4 @@ cmake/*
 weights/*
 data/*
 output/*
+bin/*
