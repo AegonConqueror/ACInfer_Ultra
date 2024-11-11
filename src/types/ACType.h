@@ -40,6 +40,7 @@ typedef enum {
     OUTPUT_ATTR_ERROR = -5,      // 输出数据属性错误
     RUNTIME_ERROR = -6,          // 运行时错误
     MODEL_NOT_LOAD = -7,         // 模型未加载
+    PROCESS_FAIL = -8        // 数据处理失败
 } error_e;
 
 #endif // ACINFER_ULTRA_ACTYPE_H

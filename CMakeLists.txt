@@ -75,6 +75,13 @@ if(USE_ONNXRUNTIME)
     else()
         message(FATAL_ERROR "Cannot find ONNXRuntime")
     endif()
+
+    find_package(OpenCV QUIET)
+    if (OpenCV_FOUND)
+        message(STATUS ">>\t\tOpenCV version: ${OpenCV_VERSION}")
+    else()
+        message(FATAL_ERROR "Cannot find OpenCV")
+    endif()
 endif(USE_ONNXRUNTIME)
 
 if(USE_ATALS)

@@ -31,7 +31,8 @@ MS_DLL error_e Initialize(
     AC_HANDLE* handle, 
     int platform,
     const std::string &file_path,
-    bool use_plugins=false
+    bool model_log = true,
+    bool use_plugins = false
 );
 
 MS_DLL error_e Destory(AC_HANDLE handle);
@@ -39,6 +40,12 @@ MS_DLL error_e Destory(AC_HANDLE handle);
 MS_DLL void BindingInput(AC_HANDLE handle, InferenceDataType& inputData);
 
 MS_DLL void GetInferOutput(AC_HANDLE handle, InferenceDataType& outputData);
+
+MS_DLL std::vector<int> GetInputShape(AC_HANDLE handle, int index);
+
+MS_DLL std::string GetInputType(AC_HANDLE handle, int index);
+
+MS_DLL std::vector<std::vector<int>> GetOutputShapes(AC_HANDLE handle);
 
 #ifdef __cplusplus
 }

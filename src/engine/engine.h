@@ -16,14 +16,13 @@
 #include <memory>
 
 #include "types/ACType.h"
-#include "common/utils.h"
+#include "utils/utils.h"
 
 typedef int MemorySize;
 using InferenceDataType = std::vector<std::pair<void*, MemorySize>>;
 
 class ACEngine {
 public:
-    ACEngine();
     virtual ~ACEngine() {};
 
     virtual error_e     Initialize(const std::string &file_path, bool use_plugins=false) = 0;

@@ -14,8 +14,7 @@ std::string data_type_string(ONNXTensorElementDataType dt){
 }
 
 ONNXEngine::ONNXEngine()
-    : ACEngine(),
-    m_env(Ort::Env(ORT_LOGGING_LEVEL_WARNING, "ONNXEngine")),
+    : m_env(Ort::Env(ORT_LOGGING_LEVEL_WARNING, "ONNXEngine")),
     memoryInfo(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)) {};
 
 error_e ONNXEngine::Destory() {
@@ -58,13 +57,13 @@ void ONNXEngine::Print() {
     LOG_INFO("\tInputs: %d", m_numInputs);
     for(int i = 0; i < m_numInputs; ++i){
         auto input_shape = m_inputShapes[i];
-        LOG_INFO("\t\t%d.%s : shape {%s}, %s", i, m_inputNodeNames[i], iTools::vector_shape_string(input_shape), data_type_string(input_types[i]).c_str());
+        LOG_INFO("\t\t%d.%s : shape {%s}, %s", i, m_inputNodeNames[i], iTools::vector_shape_string(input_shape).c_str(), data_type_string(input_types[i]).c_str());
     }
 
     LOG_INFO("\tOutputs: %d", m_numOutputs);
     for(int i = 0; i < m_numOutputs; ++i){
         auto output_shape = m_outputShapes[i];
-        LOG_INFO("\t\t%d.%s : shape {%s}, %s", i, m_outputNodeNames[i], iTools::vector_shape_string(output_shape), data_type_string(output_types[i]).c_str());
+        LOG_INFO("\t\t%d.%s : shape {%s}, %s", i, m_outputNodeNames[i], iTools::vector_shape_string(output_shape).c_str(), data_type_string(output_types[i]).c_str());
     }
 }
 

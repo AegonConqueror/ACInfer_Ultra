@@ -7,7 +7,6 @@
 #include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <opencv2/opencv.hpp>
 
 namespace iLog {
 

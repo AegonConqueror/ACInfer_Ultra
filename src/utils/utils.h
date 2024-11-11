@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 #include <numeric>
+#include <opencv2/opencv.hpp>
 
 #define LOG_INFO(...)           iLog::__log_func(__FILE__, __LINE__, iLog::LogLevel::Info,   __VA_ARGS__)
 #define LOG_ERROR(...)          iLog::__log_func(__FILE__, __LINE__, iLog::LogLevel::Error,   __VA_ARGS__)
