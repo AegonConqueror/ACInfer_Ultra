@@ -25,7 +25,7 @@ class ACEngine {
 public:
     virtual ~ACEngine() {};
 
-    virtual error_e     Initialize(const std::string &file_path, bool use_plugins=false) = 0;
+    virtual error_e     Initialize(const std::string &file_path, bool owner_device, bool use_plugins=false) = 0;
     virtual error_e     Destory() = 0;
     virtual void        BindingInput(InferenceDataType& inputData) = 0;
     virtual void        GetInferOutput(InferenceDataType& outputData) = 0;

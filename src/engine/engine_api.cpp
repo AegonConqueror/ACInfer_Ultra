@@ -5,19 +5,24 @@ MS_DLL error_e  Initialize(
     AC_HANDLE* handle, 
     int platform,
     const std::string &file_path,
+    bool owner_device,
     bool model_log,
     bool use_plugins
 ) {
     ACEngine* engine_;
     if (platform == 0) {
 #ifdef USE_ONNXRUNTIME
-        engine_ = new ONNXEngine();
+    engine_ = new ONNXEngine();
+#endif
+    } else if (platform == 1) {
+#ifdef USE_ATALS
+    engine_ = new AtlasEngine();
 #endif
     } else {
         LOG_ERROR("Unsupport platform %d", platform);
     }
 
-    error_e ret = engine_->Initialize(file_path, use_plugins);
+    error_e ret = engine_->Initialize(file_path, owner_device, use_plugins);
     *handle = (void*)engine_;
 
     if (model_log) {

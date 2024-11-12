@@ -18,7 +18,7 @@ int main(int argc, char **argv){
     auto det_onnx_file = "./weights/yolov8_coco_f16.onnx";
     auto img_file   = "./data/car.jpg";
 
-    YOLO::Detector yolov8_detector(det_onnx_file, 0);
+    YOLO::Detector yolov8_detector(det_onnx_file, 1);
 
     cv::Mat image = cv::imread(img_file);
     std::vector<YOLO::detect_result> results;

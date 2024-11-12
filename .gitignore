@@ -10,3 +10,4 @@ weights/*
 data/*
 output/*
 bin/*
+.gitignore

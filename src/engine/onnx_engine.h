@@ -13,15 +13,14 @@
 #define ACINFER_ULTRA_ONNX_ENGINE_H
 
 #include "engine.h"
-
 #include <onnxruntime_cxx_api.h>
 
 class ONNXEngine : public ACEngine {
-    public:
+public:
     ONNXEngine();
     ~ONNXEngine() override {};
 
-    virtual error_e     Initialize(const std::string &file_path, bool use_plugins=false) override;
+    virtual error_e     Initialize(const std::string &file_path, bool owner_device=false, bool use_plugins=false) override;
     virtual error_e     Destory() override;
     virtual void        BindingInput(InferenceDataType& inputData) override;
     virtual void        GetInferOutput(InferenceDataType& outputData) override;

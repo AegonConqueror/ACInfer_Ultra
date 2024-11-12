@@ -1,7 +1,7 @@
 
 #include "onnx_engine.h"
 
-std::string data_type_string(ONNXTensorElementDataType dt){
+inline std::string data_type_string(ONNXTensorElementDataType dt){
     switch(dt){
         case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT:   return "Float";
         case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16: return "Float16";
@@ -52,8 +52,8 @@ error_e ONNXEngine::Destory() {
 }
 
 void ONNXEngine::Print() {
+    LOG_INFO("****************************************************************************");
     LOG_INFO("Infer %p detail", this);
-
     LOG_INFO("\tInputs: %d", m_numInputs);
     for(int i = 0; i < m_numInputs; ++i){
         auto input_shape = m_inputShapes[i];
@@ -65,6 +65,7 @@ void ONNXEngine::Print() {
         auto output_shape = m_outputShapes[i];
         LOG_INFO("\t\t%d.%s : shape {%s}, %s", i, m_outputNodeNames[i], iTools::vector_shape_string(output_shape).c_str(), data_type_string(output_types[i]).c_str());
     }
+    LOG_INFO("****************************************************************************");
 }
 
 std::vector<int> ONNXEngine::GetInputShape(int index) {
@@ -100,7 +101,7 @@ std::vector<std::string> ONNXEngine::GetOutputTypes(){
     return output_chars;
 }
 
-error_e ONNXEngine::Initialize(const std::string &file, bool use_plugins) {
+error_e ONNXEngine::Initialize(const std::string &file, bool owner_device, bool use_plugins) {
 
     sessionOptions.SetGraphOptimizationLevel(ORT_ENABLE_BASIC);
     sessionOptions.SetLogSeverityLevel(4);

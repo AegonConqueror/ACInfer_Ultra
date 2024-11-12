@@ -23,6 +23,10 @@
     #include "onnx_engine.h"
 #endif
 
+#ifdef USE_ATALS
+    #include "atlas_engine.h"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
@@ -30,7 +34,8 @@ extern "C" {
 MS_DLL error_e Initialize(
     AC_HANDLE* handle, 
     int platform,
-    const std::string &file_path,
+    const std::string &file_path, 
+    bool owner_device,
     bool model_log = true,
     bool use_plugins = false
 );
