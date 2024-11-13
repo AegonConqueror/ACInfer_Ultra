@@ -172,7 +172,7 @@ std::vector<std::string> AtlasEngine::GetOutputTypes() {
     return output_chars;
 }
 
-error_e AtlasEngine::Initialize(const std::string &file, bool owner_device, bool use_plugins) {
+error_e AtlasEngine::Initialize(const std::string &model_file, bool owner_device, bool use_plugins) {
     owner_device_ = owner_device;
     aclError ret;
     if (owner_device_) {
