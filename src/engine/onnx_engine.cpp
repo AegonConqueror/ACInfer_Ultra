@@ -1,5 +1,52 @@
 
-#include "onnx_engine.h"
+#include "engine.h"
+#include <onnxruntime_cxx_api.h>
+
+class ONNXEngine : public ACEngine {
+public:
+    ONNXEngine(): m_env(Ort::Env(ORT_LOGGING_LEVEL_WARNING, "ONNXEngine")),
+        memoryInfo(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)) {};
+
+    ~ONNXEngine() override { destory(); };
+
+    error_e create(const std::string &file);
+
+    virtual void        Print() override;
+    virtual void        BindingInput(InferenceDataType& inputData) override;
+    virtual void        GetInferOutput(InferenceDataType& outputData) override;
+
+    virtual std::vector<int>                GetInputShape(int index) override;
+    virtual std::vector<std::vector<int>>   GetOutputShapes() override;
+    virtual std::string                     GetInputType(int index) override;
+    virtual std::vector<std::string>        GetOutputTypes() override;
+
+private:
+    error_e destory();
+
+private:
+    std::vector<ONNXTensorElementDataType>  input_types;
+    std::vector<ONNXTensorElementDataType>  output_types;
+
+    Ort::Session*                           m_session = nullptr;
+    Ort::Env        						m_env;
+    Ort::AllocatorWithDefaultOptions 		m_ortAllocator;
+
+    uint8_t 								m_numInputs;
+    uint8_t 								m_numOutputs;
+    std::vector<char*> 						m_inputNodeNames;
+    std::vector<char*> 						m_outputNodeNames;
+    std::vector<int64_t> 					m_inputTensorSizes;
+    std::vector<int64_t> 					m_outputTensorSizes;
+    std::vector<std::vector<int64_t>> 		m_inputShapes;
+    std::vector<std::vector<int64_t>> 		m_outputShapes;
+
+    Ort::SessionOptions 					sessionOptions;
+    Ort::MemoryInfo                         memoryInfo;
+
+    std::vector<Ort::Value> inputTensors;
+	std::vector<Ort::Value> outputTensors;
+};
+
 
 inline std::string data_type_string(ONNXTensorElementDataType dt){
     switch(dt){
@@ -13,11 +60,7 @@ inline std::string data_type_string(ONNXTensorElementDataType dt){
     }
 }
 
-ONNXEngine::ONNXEngine()
-    : m_env(Ort::Env(ORT_LOGGING_LEVEL_WARNING, "ONNXEngine")),
-    memoryInfo(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)) {};
-
-error_e ONNXEngine::Destory() {
+error_e ONNXEngine::destory() {
     for (int i = 0; i < inputTensors.size(); ++i) {
         inputTensors[i].release();
     }
@@ -101,7 +144,7 @@ std::vector<std::string> ONNXEngine::GetOutputTypes(){
     return output_chars;
 }
 
-error_e ONNXEngine::Initialize(const std::string &file, bool owner_device, bool use_plugins) {
+error_e ONNXEngine::create(const std::string &file) {
 
     sessionOptions.SetGraphOptimizationLevel(ORT_ENABLE_BASIC);
     sessionOptions.SetLogSeverityLevel(4);
@@ -154,7 +197,6 @@ error_e ONNXEngine::Initialize(const std::string &file, bool owner_device, bool 
         auto outputName = m_session->GetOutputNameAllocated(i, m_ortAllocator);
         m_outputNodeNames.emplace_back(strdup(outputName.get()));
     }
-    
     return SUCCESS;
 }
 
@@ -168,8 +210,7 @@ void ONNXEngine::BindingInput(InferenceDataType& inputData) {
 
     for (size_t i = 0; i < m_numInputs; i++) {
         auto input_type = input_types[i];
-        if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-            // 半精度io
+        if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) { // 半精度io
             inputTensors.emplace_back(
                 std::move(
                     Ort::Value::CreateTensor<Ort::Float16_t>(
@@ -181,8 +222,7 @@ void ONNXEngine::BindingInput(InferenceDataType& inputData) {
                     )
                 )
             );
-        } else {
-            // 单精度io
+        } else { // 单精度io
             inputTensors.emplace_back(
                 std::move(
                     Ort::Value::CreateTensor<float>(
@@ -234,4 +274,12 @@ void ONNXEngine::GetInferOutput(InferenceDataType& outputData) {
             );
         }
     }
+}
+
+std::shared_ptr<ACEngine> create_engine(const std::string &file_path, bool use_plugins) {
+    std::shared_ptr<ONNXEngine> Instance(new ONNXEngine());
+    if (Instance->create(file_path) != SUCCESS) {
+        Instance.reset();
+    }
+    return Instance;
 }

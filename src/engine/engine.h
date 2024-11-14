@@ -25,8 +25,7 @@ class ACEngine {
 public:
     virtual ~ACEngine() {};
 
-    virtual void Print() = 0;
-
+    virtual void        Print() = 0;
     virtual void        BindingInput(InferenceDataType& inputData) = 0;
     virtual void        GetInferOutput(InferenceDataType& outputData) = 0;
 

@@ -13,7 +13,7 @@
 #define ACINFER_ULTRA_YOLO_H
 
 #include "types/ACType.h"
-#include "engine/engine_api.h"
+#include "engine/engine.h"
 
 namespace YOLO {
 
@@ -29,26 +29,14 @@ namespace YOLO {
 
     class Detector {
     public:
-        Detector(
-            const std::string &model_path, 
-            int platform, 
-            Type yolo_type=Type::V8,
-            bool use_plugins=false
-        );
-        ~Detector();
-        error_e Run(const cv::Mat &frame, std::vector<detect_result> &objects);
-
-    private:
-        error_e Preprocess(const cv::Mat &frame, cv::Mat &timg);
-        error_e Postprocess(const cv::Mat &frame, std::vector<detect_result> &objects);
-
-    private:
-        bool    use_plugins_;
-        void*   engine_;
-        Type    yolo_type_;
-
-        std::vector<int> input_shape_;
+        virtual error_e Run(const cv::Mat &frame, std::vector<detect_result> &objects) = 0;
     };
+
+    std::shared_ptr<Detector> CreateDetector(
+        const std::string &model_path, 
+        Type yolo_type=Type::V8,
+        bool use_plugins=false
+    );
     
 } // namespace YOLO
 

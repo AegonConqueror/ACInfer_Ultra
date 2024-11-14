@@ -1,7 +1,9 @@
 
 #include <iostream>
+#include <stdio.h>
 
 #include "detect/yolo.h"
+
 
 std::vector<std::string> class_names = {
     "person", "bicycle", "car", "motorbike ", "aeroplane ", "bus ", "train", "truck ", "boat", "traffic light",
@@ -18,12 +20,12 @@ int main(int argc, char **argv){
     auto det_onnx_file = "./weights/yolov8_coco_f16.onnx";
     auto img_file   = "./data/car.jpg";
 
-    YOLO::Detector yolov8_detector(det_onnx_file, 1);
+    auto yolo_detector = YOLO::CreateDetector(det_onnx_file, YOLO::Type::V8);
 
     cv::Mat image = cv::imread(img_file);
     std::vector<YOLO::detect_result> results;
 
-    yolov8_detector.Run(image, results);
+    yolo_detector->Run(image, results);
 
     for (auto ibox : results) {
         cv::rectangle(image, ibox.box, (255, 255, 0), 2);

@@ -3,48 +3,85 @@
 #include "yolo_postprocess/postprocess.h"
 
 namespace YOLO {
+
+    class YoloDetector : public Detector {
+    public:
+        error_e load(const std::string &model_path, Type yolo_type, bool use_plugin);
+
+        virtual error_e Run(const cv::Mat &frame, std::vector<detect_result> &objects) override;
+
+    private:
+        error_e preprocess(const cv::Mat &frame);
+        error_e postprocess(const cv::Mat &frame, std::vector<detect_result> &objects);
+
+    public:
+        std::shared_ptr<ACEngine>   engine_;
+        Type                        yolo_type_;
+        std::vector<int>            input_shape_;
+        int                         data_type_;
+    };
     
-    Detector::Detector(const std::string &model_path, int platform, Type yolo_type, bool use_plugins)
-        : use_plugins_(use_plugins), yolo_type_(yolo_type)
-    {
-        error_e ret = Initialize(&engine_, platform, model_path);
-        input_shape_ = GetInputShape(engine_, 0);
+
+    error_e YoloDetector::load(const std::string &model_path, Type yolo_type, bool use_plugins) {
+        yolo_type_ = yolo_type;
+        engine_ = create_engine(model_path, use_plugins);
+        if (!engine_){
+            LOG_ERROR("Deserialize onnx failed.");
+            return LOAD_MODEL_FAIL;
+        }
+        engine_->Print();
+        input_shape_    = engine_->GetInputShape();
+        data_type_      = (engine_->GetInputType() == "Float") ? CV_32F : CV_16F;
+
+        return SUCCESS;
     }
 
-    Detector::~Detector() {
-        error_e ret = Destory(engine_);
-        engine_ = nullptr;
-    }
-
-    error_e Detector::Preprocess(const cv::Mat &frame, cv::Mat &timg) {
+    error_e YoloDetector::preprocess(const cv::Mat &frame) {
         int input_h     = input_shape_[2];
         int input_w     = input_shape_[3];
 
+        cv::Mat timg;
         if (yolo_type_ == Type::V8) {
             cv::Mat src, Rgb;
             cv::cvtColor(frame, Rgb, cv::COLOR_BGR2RGB);
             cv::resize(Rgb, src, cv::Size(input_w, input_h));
             cv::dnn::blobFromImage(src, timg, 1.0 / 255, cv::Size(input_w, input_h));
-            int targetType = (GetInputType(engine_, 0) == "Float") ? CV_32F : CV_16F;
-            timg.convertTo(timg, targetType);
+            timg.convertTo(timg, data_type_);
         } else {
             LOG_ERROR("This YOLO version does not support yet!");
             return PROCESS_FAIL;
         }
+
+        InferenceDataType infer_input_data;
+
+        if (data_type_ == CV_32F) {
+            infer_input_data.emplace_back(
+                std::make_pair((void *)timg.ptr<float>(), timg.total() * timg.elemSize())
+            );
+        } else if (data_type_ == CV_16F){
+            infer_input_data.emplace_back(
+                std::make_pair((void *)timg.ptr<uint16_t>(), timg.total() * timg.elemSize())
+            );
+        }else{
+            LOG_ERROR("This data type does not support yet!");
+            return PROCESS_FAIL;
+        }
+        
+        engine_->BindingInput(infer_input_data);
         return SUCCESS;
     }   
 
-    error_e Detector::Postprocess(const cv::Mat &frame, std::vector<detect_result> &objects) {
+    error_e YoloDetector::postprocess(const cv::Mat &frame, std::vector<detect_result> &objects) {
         if (yolo_type_ == Type::V8) {
             auto image_w    = frame.cols;
             auto image_h    = frame.rows;
             auto input_w    = input_shape_[2];
             auto input_h    = input_shape_[3];
 
-            auto output_shapes = GetOutputShapes(engine_);
+            auto output_shapes = engine_->GetOutputShapes();
 
             InferenceDataType infer_result_data;
-            GetInferOutput(engine_, infer_result_data);
+            engine_->GetInferOutput(infer_result_data);
 
             if (output_shapes.size() == 1) {
                 /* code */
@@ -57,11 +94,14 @@ namespace YOLO {
                 for (size_t i = 0; i < output_num; i++){
                     auto output_shape = output_shapes[i];
                     std::unique_ptr<float[]> pred;
-                    if (GetInputType(engine_, 0) == "Float16") {
+                    if (data_type_ == CV_16F) {
                         uint16_t* item = (uint16_t* )infer_result_data[i].first;
                         pred = std::unique_ptr<float[]>(iTools::halfToFloat((void *)item, output_shape));
-                    } else {
+                    } else if (data_type_ == CV_32F) {
                         pred = std::unique_ptr<float[]>((float *)infer_result_data[0].first);
+                    } else {
+                        LOG_ERROR("This data type does not support yet!");
+                        return PROCESS_FAIL;
                     }
                     output_data.push_back(std::move(pred));
                 }
@@ -94,22 +134,20 @@ namespace YOLO {
         return SUCCESS;
     }
 
-    error_e Detector::Run(const cv::Mat &frame, std::vector<detect_result> &objects) {
-        cv::Mat input_img;
-        auto ret = Preprocess(frame, input_img);
+    error_e YoloDetector::Run(const cv::Mat &frame, std::vector<detect_result> &objects) {
+        auto ret = preprocess(frame);
         if (ret != SUCCESS){
             LOG_ERROR("yolo preprocess fail ...");
             return ret;
         }
-
-        InferenceDataType infer_input_data;
-        infer_input_data.emplace_back(
-            std::make_pair((void *)input_img.ptr<uint16_t>(), input_img.total() * input_img.elemSize())
-        );
-
-        BindingInput(engine_, infer_input_data);
-
-        return Postprocess(frame, objects);
+        return postprocess(frame, objects);
     }
 
+    std::shared_ptr<Detector> CreateDetector(const std::string &model_path, Type yolo_type, bool use_plugins) {
+        std::shared_ptr<YoloDetector> Instance(new YoloDetector());
+        if (Instance->load(model_path, yolo_type, use_plugins) != SUCCESS) {
+            Instance.reset();
+        }
+        return Instance;
+    }
 } // namespace YOLO
