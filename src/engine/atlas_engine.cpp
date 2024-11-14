@@ -4,15 +4,17 @@
 
 class AtlasEngine : public ACEngine {
 public:
-    AtlasEngine();
-    ~AtlasEngine() override;
+    AtlasEngine(): deviceId_(0), context_(nullptr), stream_(nullptr), modelId_(0), modelWorkSize_(0), 
+    modelWeightSize_(0), modelWorkPtr_(nullptr), modelWeightPtr_(nullptr), loadFlag_(false), 
+    modelDesc_(nullptr), input_(nullptr), output_(nullptr), is_init_(true), isDevice_(false) { }
 
-    virtual error_e     Initialize(const std::string &file_path, bool owner_device, bool use_plugins=false) override;
-    virtual error_e     Destory() override;
+    ~AtlasEngine() override { destory(); };
+
+    error_e     create(const std::string &file_path);
+
+    virtual void        Print() override;
     virtual void        BindingInput(InferenceDataType& inputData) override;
     virtual void        GetInferOutput(InferenceDataType& outputData) override;
-
-    virtual void Print() override;
 
     virtual std::vector<int>                GetInputShape(int index) override;
     virtual std::vector<std::vector<int>>   GetOutputShapes() override;
@@ -20,15 +22,11 @@ public:
     virtual std::vector<std::string>        GetOutputTypes() override;
 
 private:
-    void UnloadModel();
-    void DestroyInput();
-    void DestroyOutput();
-    void DestroyResource();
+    error_e destory();
 
 private:
     int                             deviceId_;
     bool                            isDevice_;
-    bool                            owner_device_;
     bool                            is_init_;
     bool                            loadFlag_;
     uint32_t                        modelId_;
@@ -61,12 +59,7 @@ inline std::string data_type_string(aclDataType dt){
     }
 }
 
-AtlasEngine::AtlasEngine() 
-    : deviceId_(0), context_(nullptr), stream_(nullptr), modelId_(0), modelWorkSize_(0), 
-    modelWeightSize_(0), modelWorkPtr_(nullptr), modelWeightPtr_(nullptr), loadFlag_(false), 
-    modelDesc_(nullptr), input_(nullptr), output_(nullptr), is_init_(true), isDevice_(false) { }
-
-error_e AtlasEngine::Destory() {
+error_e AtlasEngine::destory() {
     if (loadFlag_) {
         aclError ret = aclmdlUnload(modelId_);
         if (ret != ACL_SUCCESS) {
@@ -157,6 +150,7 @@ error_e AtlasEngine::Destory() {
         }
         LOG_INFO("end to finalize acl");
     }
+    return SUCCESS;
 }
 
 void AtlasEngine::Print() {
@@ -220,56 +214,53 @@ std::vector<std::string> AtlasEngine::GetOutputTypes() {
     return output_chars;
 }
 
-error_e AtlasEngine::Initialize(const std::string &model_file, bool owner_device, bool use_plugins) {
-    owner_device_ = owner_device;
+error_e AtlasEngine::create(const std::string &model_file) {
     aclError ret;
-    if (owner_device_) {
-        // /*          ---------- ACL初始化 ----------          */
-        ret = aclInit(nullptr);
-        if (ret != ACL_SUCCESS) {
-            LOG_ERROR("acl init failed, errorCode = %d", static_cast<int32_t>(ret));
-            return DEVICE_INIT_FAIL;
-        }
-        LOG_INFO("acl init success");
-
-        // 1. 指定运算的Device
-        ret = aclrtSetDevice(deviceId_);
-        if (ret != ACL_SUCCESS) {
-            LOG_ERROR("acl set device %d failed, errorCode = %d", deviceId_, static_cast<int32_t>(ret));
-            return DEVICE_INIT_FAIL;
-        }
-        LOG_INFO("set device %d success", deviceId_);
-
-        // 2. 显式创建一个Context，用于管理Stream对象
-        ret = aclrtCreateContext(&context_, deviceId_);
-        if (ret != ACL_SUCCESS) {
-            LOG_ERROR("acl create context failed, deviceId = %d, errorCode = %d",
-                deviceId_, static_cast<int32_t>(ret));
-            return DEVICE_INIT_FAIL;
-        }
-        LOG_INFO("create context success");
-
-        // 3. 显式创建一个Stream，用于维护一些异步操作的执行顺序，确保按照应用程序中的代码调用顺序执行任务
-        ret = aclrtCreateStream(&stream_);
-        if (ret != ACL_SUCCESS) {
-            LOG_ERROR("acl create stream failed, deviceId = %d, errorCode = %d",
-                deviceId_, static_cast<int32_t>(ret));
-            return DEVICE_INIT_FAIL;
-        }
-        LOG_INFO("create stream success");
-
-        // get run mode
-        // runMode is ACL_HOST which represents app is running in host
-        // runMode is ACL_DEVICE which represents app is running in device
-        aclrtRunMode runMode;
-        ret = aclrtGetRunMode(&runMode);
-        if (ret != ACL_SUCCESS) {
-            LOG_ERROR("acl get run mode failed, errorCode = %d", static_cast<int32_t>(ret));
-            return DEVICE_INIT_FAIL;
-        }
-        isDevice_ = (runMode == ACL_DEVICE);
-        LOG_INFO("get run mode success");
+    // /*          ---------- ACL初始化 ----------          */
+    ret = aclInit(nullptr);
+    if (ret != ACL_SUCCESS) {
+        LOG_ERROR("acl init failed, errorCode = %d", static_cast<int32_t>(ret));
+        return DEVICE_INIT_FAIL;
     }
+    LOG_INFO("acl init success");
+
+    // 1. 指定运算的Device
+    ret = aclrtSetDevice(deviceId_);
+    if (ret != ACL_SUCCESS) {
+        LOG_ERROR("acl set device %d failed, errorCode = %d", deviceId_, static_cast<int32_t>(ret));
+        return DEVICE_INIT_FAIL;
+    }
+    LOG_INFO("set device %d success", deviceId_);
+
+    // 2. 显式创建一个Context，用于管理Stream对象
+    ret = aclrtCreateContext(&context_, deviceId_);
+    if (ret != ACL_SUCCESS) {
+        LOG_ERROR("acl create context failed, deviceId = %d, errorCode = %d",
+            deviceId_, static_cast<int32_t>(ret));
+        return DEVICE_INIT_FAIL;
+    }
+    LOG_INFO("create context success");
+
+    // 3. 显式创建一个Stream，用于维护一些异步操作的执行顺序，确保按照应用程序中的代码调用顺序执行任务
+    ret = aclrtCreateStream(&stream_);
+    if (ret != ACL_SUCCESS) {
+        LOG_ERROR("acl create stream failed, deviceId = %d, errorCode = %d",
+            deviceId_, static_cast<int32_t>(ret));
+        return DEVICE_INIT_FAIL;
+    }
+    LOG_INFO("create stream success");
+
+    // get run mode
+    // runMode is ACL_HOST which represents app is running in host
+    // runMode is ACL_DEVICE which represents app is running in device
+    aclrtRunMode runMode;
+    ret = aclrtGetRunMode(&runMode);
+    if (ret != ACL_SUCCESS) {
+        LOG_ERROR("acl get run mode failed, errorCode = %d", static_cast<int32_t>(ret));
+        return DEVICE_INIT_FAIL;
+    }
+    isDevice_ = (runMode == ACL_DEVICE);
+    LOG_INFO("get run mode success");
     
     // /*          ---------- 模型初始化 ----------          */
     if (loadFlag_){
@@ -459,4 +450,12 @@ void AtlasEngine::GetInferOutput(InferenceDataType& outputData) {
         }
     }
     return;
+}
+
+std::shared_ptr<ACEngine> create_engine(const std::string &file_path, bool use_plugins) {
+    std::shared_ptr<AtlasEngine> Instance(new AtlasEngine());
+    if (Instance->create(file_path) != SUCCESS) {
+        Instance.reset();
+    }
+    return Instance;
 }

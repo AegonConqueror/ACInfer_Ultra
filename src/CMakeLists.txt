@@ -7,7 +7,11 @@ include_directories(${OpenCV_INCLUDE_DIR})
 if(USE_ONNXRUNTIME)
     include_directories(${ONNXRuntime_INCLUDE_DIR})
     set(ENGINE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/engine/onnx_engine.cpp")
-endif()
+endif(USE_ONNXRUNTIME)
+
+if(USE_ATALS)
+    set(ENGINE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/engine/atlas_engine.cpp")
+endif(USE_ATALS)
 
 
 add_executable(
