@@ -10,4 +10,5 @@ weights/*
 data/*
 output/*
 bin/*
+onnx/*
 .gitignore

@@ -89,26 +89,24 @@ namespace YOLO {
                 int class_num = output_shapes[1][1];
 
                 size_t output_num = infer_result_data.size();
-                std::vector<std::unique_ptr<float[]>> output_data;
+                void* output_data[output_num];
 
                 for (size_t i = 0; i < output_num; i++){
                     auto output_shape = output_shapes[i];
-                    std::unique_ptr<float[]> pred;
                     if (data_type_ == CV_16F) {
                         uint16_t* item = (uint16_t* )infer_result_data[i].first;
-                        pred = std::unique_ptr<float[]>(iTools::halfToFloat((void *)item, output_shape));
+                        output_data[i] = (void*)iTools::halfToFloat((void *)item, output_shape);
                     } else if (data_type_ == CV_32F) {
-                        pred = std::unique_ptr<float[]>((float *)infer_result_data[0].first);
+                        output_data[i] = (void*)infer_result_data[i].first;
                     } else {
                         LOG_ERROR("This data type does not support yet!");
                         return PROCESS_FAIL;
                     }
-                    output_data.push_back(std::move(pred));
                 }
 
                 std::vector<float> DetectiontRects;
                 yolov8::PostprocessSpilt(
-                    (float **)output_data.data(), DetectiontRects,
+                    (float **)output_data, DetectiontRects,
                     input_w, input_h, class_num
                 );
                 
@@ -125,6 +123,13 @@ namespace YOLO {
                     result.class_id = classId;
                     result.confidence = conf;
                     objects.push_back(result);
+                }
+
+                // 释放内存
+                if (data_type_ == CV_16F) {
+                    for (size_t i = 0; i < output_num; i++) {
+                        delete[] static_cast<float*>(output_data[i]);
+                    }
                 }
             }
         } else {

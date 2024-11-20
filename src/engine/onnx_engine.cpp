@@ -146,7 +146,7 @@ std::vector<std::string> ONNXEngine::GetOutputTypes(){
 
 error_e ONNXEngine::create(const std::string &file) {
 
-    sessionOptions.SetGraphOptimizationLevel(ORT_ENABLE_BASIC);
+    sessionOptions.SetGraphOptimizationLevel(ORT_ENABLE_ALL);
     sessionOptions.SetLogSeverityLevel(4);
     sessionOptions.SetIntraOpNumThreads(0);
     OrtSessionOptionsAppendExecutionProvider_CUDA(sessionOptions, 0);

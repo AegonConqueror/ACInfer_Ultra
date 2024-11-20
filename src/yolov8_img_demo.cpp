@@ -4,7 +4,6 @@
 
 #include "detect/yolo.h"
 
-
 std::vector<std::string> class_names = {
     "person", "bicycle", "car", "motorbike ", "aeroplane ", "bus ", "train", "truck ", "boat", "traffic light",
     "fire hydrant", "stop sign ", "parking meter", "bench", "bird", "cat", "dog ", "horse ", "sheep", "cow", "elephant",
@@ -17,8 +16,8 @@ std::vector<std::string> class_names = {
 
 int main(int argc, char **argv){ 
 
-    auto det_onnx_file = "./weights/yolov8_coco_f16.onnx";
-    auto img_file   = "./data/car.jpg";
+    auto det_onnx_file = "./onnx/yolov8s_coco.onnx";
+    auto img_file   = "./data/street.jpg";
 
     auto yolo_detector = YOLO::CreateDetector(det_onnx_file, YOLO::Type::V8);
 
@@ -28,13 +27,7 @@ int main(int argc, char **argv){
     yolo_detector->Run(image, results);
 
     for (auto ibox : results) {
-        cv::rectangle(image, ibox.box, (255, 255, 0), 2);
-        std::string class_name  = class_names[ibox.class_id];
-        char draw_string[100];
-        sprintf(draw_string, "%s   %.2f", class_name.c_str(), ibox.confidence);
-        printf("name %s\n", class_name.c_str());
-        cv::putText(image, draw_string, cv::Point(ibox.box.x, ibox.box.y - 5), cv::FONT_HERSHEY_SIMPLEX, 1,
-                    (255, 255, 0), 2);
+        iDraw::draw_box_label(image, ibox.box, ibox.class_id, ibox.confidence);
     }
     results.clear();
 

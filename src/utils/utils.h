@@ -75,5 +75,13 @@ namespace iTime {
     
 } // namespace iTime
 
+namespace iDraw {
+    void draw_box_label(
+        cv::Mat &img, const cv::Rect_<float> &box, 
+        const int class_id, const float conf,
+        const std::vector<std::string> &class_names={}
+    );
+} // namespace iDraw
+
 
 #endif // ACENGINE_UTILS_H
