@@ -9,7 +9,7 @@ public:
 
     ~ONNXEngine() override { destory(); };
 
-    error_e create(const std::string &file);
+    error_e init(const std::string &file);
 
     virtual void        Print() override;
     virtual void        BindingInput(InferenceDataType& inputData) override;
@@ -21,7 +21,7 @@ public:
     virtual std::vector<std::string>        GetOutputTypes() override;
 
 private:
-    error_e destory();
+    void destory();
 
 private:
     std::vector<ONNXTensorElementDataType>  input_types;
@@ -60,7 +60,7 @@ inline std::string data_type_string(ONNXTensorElementDataType dt){
     }
 }
 
-error_e ONNXEngine::destory() {
+void ONNXEngine::destory() {
     for (int i = 0; i < inputTensors.size(); ++i) {
         inputTensors[i].release();
     }
@@ -91,7 +91,6 @@ error_e ONNXEngine::destory() {
         free(m_outputNodeNames[i]);
     }
     m_outputNodeNames.clear();
-    return SUCCESS;
 }
 
 void ONNXEngine::Print() {
@@ -144,9 +143,9 @@ std::vector<std::string> ONNXEngine::GetOutputTypes(){
     return output_chars;
 }
 
-error_e ONNXEngine::create(const std::string &file) {
+error_e ONNXEngine::init(const std::string &file) {
 
-    sessionOptions.SetGraphOptimizationLevel(ORT_ENABLE_ALL);
+    sessionOptions.SetGraphOptimizationLevel(ORT_ENABLE_BASIC);
     sessionOptions.SetLogSeverityLevel(4);
     sessionOptions.SetIntraOpNumThreads(0);
     OrtSessionOptionsAppendExecutionProvider_CUDA(sessionOptions, 0);
@@ -163,7 +162,7 @@ error_e ONNXEngine::create(const std::string &file) {
 
 
     input_types.clear();
-    input_types.reserve(m_numOutputs);
+    input_types.reserve(m_numInputs);
     for (size_t i = 0; i < m_numInputs; i++) {
         Ort::TypeInfo typeInfo = m_session->GetInputTypeInfo(i);
         auto tensorInfo = typeInfo.GetTensorTypeAndShapeInfo();
@@ -197,6 +196,7 @@ error_e ONNXEngine::create(const std::string &file) {
         auto outputName = m_session->GetOutputNameAllocated(i, m_ortAllocator);
         m_outputNodeNames.emplace_back(strdup(outputName.get()));
     }
+    
     return SUCCESS;
 }
 
@@ -210,7 +210,8 @@ void ONNXEngine::BindingInput(InferenceDataType& inputData) {
 
     for (size_t i = 0; i < m_numInputs; i++) {
         auto input_type = input_types[i];
-        if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) { // 半精度io
+        if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+            // 半精度io
             inputTensors.emplace_back(
                 std::move(
                     Ort::Value::CreateTensor<Ort::Float16_t>(
@@ -222,7 +223,8 @@ void ONNXEngine::BindingInput(InferenceDataType& inputData) {
                     )
                 )
             );
-        } else { // 单精度io
+        } else {
+            // 单精度io
             inputTensors.emplace_back(
                 std::move(
                     Ort::Value::CreateTensor<float>(
@@ -251,6 +253,7 @@ void ONNXEngine::GetInferOutput(InferenceDataType& outputData) {
     outputData.reserve(m_numOutputs);
 
     for (auto& elem : outputTensors) {
+
         auto output_shape = elem.GetTensorTypeAndShapeInfo().GetShape();
         std::vector<int> output;
         output.reserve(output_shape.size());
@@ -278,7 +281,7 @@ void ONNXEngine::GetInferOutput(InferenceDataType& outputData) {
 
 std::shared_ptr<ACEngine> create_engine(const std::string &file_path, bool use_plugins) {
     std::shared_ptr<ONNXEngine> Instance(new ONNXEngine());
-    if (Instance->create(file_path) != SUCCESS) {
+    if (Instance->init(file_path) != SUCCESS) {
         Instance.reset();
     }
     return Instance;

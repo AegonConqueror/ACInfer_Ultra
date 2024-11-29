@@ -5,19 +5,16 @@
 #include "detect/yolo.h"
 
 std::vector<std::string> class_names = {
-    "person", "bicycle", "car", "motorbike ", "aeroplane ", "bus ", "train", "truck ", "boat", "traffic light",
-    "fire hydrant", "stop sign ", "parking meter", "bench", "bird", "cat", "dog ", "horse ", "sheep", "cow", "elephant",
-    "bear", "zebra ", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
-    "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife ",
-    "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza ", "donut", "cake", "chair", "sofa",
-    "pottedplant", "bed", "diningtable", "toilet ", "tvmonitor", "laptop	", "mouse	", "remote ", "keyboard ", "cell phone", "microwave ",
-    "oven ", "toaster", "sink", "refrigerator ", "book", "clock", "vase", "scissors ", "teddy bear ", "hair drier", "toothbrush "
+    "person", "no_gesture", "call", "dislike", "fist", "four", "like",
+    "mute", "ok", "one", "palm", "peace", "peace_inverted", "rock",
+    "stop", "stop_inverted", "three", "three2", "two_up", "two_up_inverted",
+    "face"
 };
 
-int main(int argc, char **argv){ 
+int main(int argc, char **argv){
 
-    auto det_onnx_file = "./onnx/yolov8s_coco.onnx";
-    auto img_file   = "./data/street.jpg";
+    auto det_onnx_file = "./onnx/yolov8_dict.onnx";
+    auto img_file   = "./data/person3.jpg";
 
     auto yolo_detector = YOLO::CreateDetector(det_onnx_file, YOLO::Type::V8);
 

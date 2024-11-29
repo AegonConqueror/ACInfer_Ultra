@@ -12,3 +12,5 @@ output/*
 bin/*
 onnx/*
 .gitignore
+backup/*
+lib/*

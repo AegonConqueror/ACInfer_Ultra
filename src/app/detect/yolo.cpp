@@ -11,7 +11,8 @@ namespace YOLO {
         virtual error_e Run(const cv::Mat &frame, std::vector<detect_result> &objects) override;
 
     private:
-        error_e preprocess(const cv::Mat &frame);
+        error_e preprocess(const cv::Mat &frame, cv::Mat &timg);
+        error_e inference(InferenceDataType &input_data);
         error_e postprocess(const cv::Mat &frame, std::vector<detect_result> &objects);
 
     public:
@@ -36,11 +37,10 @@ namespace YOLO {
         return SUCCESS;
     }
 
-    error_e YoloDetector::preprocess(const cv::Mat &frame) {
+    error_e YoloDetector::preprocess(const cv::Mat &frame, cv::Mat &timg) {
         int input_h     = input_shape_[2];
         int input_w     = input_shape_[3];
 
-        cv::Mat timg;
         if (yolo_type_ == Type::V8) {
             cv::Mat src, Rgb;
             cv::cvtColor(frame, Rgb, cv::COLOR_BGR2RGB);
@@ -51,25 +51,13 @@ namespace YOLO {
             LOG_ERROR("This YOLO version does not support yet!");
             return PROCESS_FAIL;
         }
-
-        InferenceDataType infer_input_data;
-
-        if (data_type_ == CV_32F) {
-            infer_input_data.emplace_back(
-                std::make_pair((void *)timg.ptr<float>(), timg.total() * timg.elemSize())
-            );
-        } else if (data_type_ == CV_16F){
-            infer_input_data.emplace_back(
-                std::make_pair((void *)timg.ptr<uint16_t>(), timg.total() * timg.elemSize())
-            );
-        }else{
-            LOG_ERROR("This data type does not support yet!");
-            return PROCESS_FAIL;
-        }
-        
-        engine_->BindingInput(infer_input_data);
         return SUCCESS;
-    }   
+    }
+
+    error_e YoloDetector::inference(InferenceDataType &input_data) {
+        engine_->BindingInput(input_data);
+        return SUCCESS;
+    }
 
     error_e YoloDetector::postprocess(const cv::Mat &frame, std::vector<detect_result> &objects) {
         if (yolo_type_ == Type::V8) {
@@ -79,16 +67,16 @@ namespace YOLO {
             auto input_h    = input_shape_[3];
 
             auto output_shapes = engine_->GetOutputShapes();
+            auto class_num = output_shapes[1][1];
+            // auto class_num = cls1_shape;
 
             InferenceDataType infer_result_data;
             engine_->GetInferOutput(infer_result_data);
 
-            if (output_shapes.size() == 1) {
+            size_t output_num = infer_result_data.size();
+            if (output_num == 1) {
                 /* code */
-            } else if (output_shapes.size() == 6) {
-                int class_num = output_shapes[1][1];
-
-                size_t output_num = infer_result_data.size();
+            } else if (output_num == 6) {
                 void* output_data[output_num];
 
                 for (size_t i = 0; i < output_num; i++){
@@ -128,7 +116,8 @@ namespace YOLO {
                 // 释放内存
                 if (data_type_ == CV_16F) {
                     for (size_t i = 0; i < output_num; i++) {
-                        delete[] static_cast<float*>(output_data[i]);
+                        delete[] output_data[i];
+                        output_data[i] = nullptr;
                     }
                 }
             }
@@ -140,11 +129,33 @@ namespace YOLO {
     }
 
     error_e YoloDetector::Run(const cv::Mat &frame, std::vector<detect_result> &objects) {
-        auto ret = preprocess(frame);
+        cv::Mat input_img;
+        auto ret = preprocess(frame, input_img);
         if (ret != SUCCESS){
             LOG_ERROR("yolo preprocess fail ...");
             return ret;
         }
+        
+        InferenceDataType infer_input_data;
+        if (data_type_ == CV_32F) {
+            infer_input_data.emplace_back(
+                std::make_pair((void *)input_img.ptr<float>(), input_img.total() * input_img.elemSize())
+            );
+        } else if (data_type_ == CV_16F){
+            infer_input_data.emplace_back(
+                std::make_pair((void *)input_img.ptr<uint16_t>(), input_img.total() * input_img.elemSize())
+            );
+        }else{
+            LOG_ERROR("This data type does not support yet!");
+            return PROCESS_FAIL;
+        }
+
+        ret = inference(infer_input_data);
+        if (ret != SUCCESS){
+            LOG_ERROR("yolov8s inference fail ...");
+            return ret;
+        }
+
         return postprocess(frame, objects);
     }
 
