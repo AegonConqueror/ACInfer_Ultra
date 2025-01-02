@@ -5,7 +5,7 @@
 
 #include "detect/yolo.h"
 #include "feature/ReID.h"
-#include ""
+#include "tracker/deepsort/deepsort.h"
 
 auto det_onnx_file = "./onnx/coco_pose_n_relu.onnx";
 auto reid_onnx_file = "./onnx/osnet_x0_25_market1501.onnx";

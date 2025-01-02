@@ -44,7 +44,7 @@ namespace BotSORT {
         float track_high_thresh = 0.5;
         float track_low_thresh = 0.1;
         float new_track_thresh = 0.6;
-        float track_buffer = 30;
+        float track_buffer = 90;
         float match_thresh = 0.8;
 
         float proximity_thresh = 0.5;

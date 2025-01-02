@@ -4,16 +4,15 @@
 
 #include "detect/yolo.h"
 
-std::vector<std::string> class_names = {
-    "person", "no_gesture", "call", "dislike", "fist", "four", "like",
-    "mute", "ok", "one", "palm", "peace", "peace_inverted", "rock",
-    "stop", "stop_inverted", "three", "three2", "two_up", "two_up_inverted",
-    "face"
-};
+// std::vector<std::string> class_names = {
+//     "person", "no_gesture", "call", "dislike", "fist", "four", "like",
+//     "mute", "ok", "one", "palm", "peace", "peace_inverted", "rock",
+//     "stop", "stop_inverted", "three", "three2", "two_up", "two_up_inverted",
+//     "face"
+// };
 
 int main(int argc, char **argv){
-
-    auto det_onnx_file = "./onnx/yolov8_dict.onnx";
+    auto det_onnx_file = "./onnx/yolov8_gestures_like_fist_n_relu_1217.onnx";
     auto img_file   = "./data/person3.jpg";
 
     auto yolo_detector = YOLO::CreateDetector(det_onnx_file, YOLO::Type::V8);
@@ -32,5 +31,4 @@ int main(int argc, char **argv){
     sprintf(save_file, "./output/yolov8s_test.jpg");
     cv::imwrite(save_file, image);
     return 0;
-
 }

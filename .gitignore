@@ -14,3 +14,4 @@ onnx/*
 .gitignore
 backup/*
 lib/*
+om/*

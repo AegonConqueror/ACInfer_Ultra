@@ -68,14 +68,59 @@ namespace YOLO {
 
             auto output_shapes = engine_->GetOutputShapes();
             auto class_num = output_shapes[1][1];
-            // auto class_num = cls1_shape;
 
             InferenceDataType infer_result_data;
             engine_->GetInferOutput(infer_result_data);
 
             size_t output_num = infer_result_data.size();
-            if (output_num == 1) {
-                /* code */
+            output_num = 6;
+            
+
+            if (output_num == 3) {
+                class_num = output_shapes[2][2];
+                float scale_x = image_w / input_w;
+                float scale_y = image_h / input_h;
+                
+                int64_t* outputs_nms = (int64_t*)infer_result_data[0].first;
+                int outputs_nms_size = infer_result_data[0].second;
+                int obj_num = outputs_nms_size / (sizeof(int64_t) * 3);
+                
+
+                auto boxes_shape = output_shapes[1];
+                uint16_t* boxes_f16 = (uint16_t* )infer_result_data[1].first;
+                float* boxes = iTools::halfToFloat((void *)boxes_f16, boxes_shape);
+
+                auto label_conf_shape = output_shapes[2];
+                uint16_t* label_conf_f16 = (uint16_t* )infer_result_data[2].first;
+                float* label_conf = iTools::halfToFloat((void *)label_conf_f16, label_conf_shape);
+
+                for (size_t i = 0; i < obj_num; i++) {
+                    int ibatch = outputs_nms[i*3];
+                    int iclass = outputs_nms[i*3 + 1];
+                    int ibox = outputs_nms[i*3 + 2];
+                    float* bbox = &boxes[ibox * 4];
+                    float conf = label_conf[ibox * class_num + iclass];
+
+                    int xmin = static_cast<int>(bbox[0] * scale_x);
+                    int ymin = static_cast<int>(bbox[1] * scale_y);
+                    int xmax = static_cast<int>(bbox[2] * scale_x);
+                    int ymax = static_cast<int>(bbox[3] * scale_y);
+
+                    detect_result result; 
+                    result.box = cv::Rect(
+                        xmin, 
+                        ymin, 
+                        xmax - xmin, 
+                        ymax - ymin
+                    );
+                    result.class_id = iclass;
+                    result.confidence = conf;
+                    objects.push_back(result);
+                }
+
+                delete[] boxes;
+                delete[] label_conf;
+
             } else if (output_num == 6) {
                 void* output_data[output_num];
 
@@ -95,7 +140,7 @@ namespace YOLO {
                 std::vector<float> DetectiontRects;
                 yolov8::PostprocessSpilt(
                     (float **)output_data, DetectiontRects,
-                    input_w, input_h, class_num
+                    input_w, input_h, class_num, 0.65
                 );
                 
                 for (int i = 0; i < DetectiontRects.size(); i += 6){

@@ -42,7 +42,7 @@ add_executable(
     ${CMAKE_CURRENT_SOURCE_DIR}/app/detect/yolo.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/app/detect/yolo_postprocess/postprocess.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/app/feature/ReID.cpp
-    ${DEEPSORT_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/app/tracker/deepsort/deepsort.cpp
 
 )
 target_link_libraries(yolov8_video_demo PRIVATE inference_engine Eigen3::Eigen)
