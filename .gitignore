@@ -15,3 +15,5 @@ onnx/*
 backup/*
 lib/*
 om/*
+*.sh
+src/demo/*

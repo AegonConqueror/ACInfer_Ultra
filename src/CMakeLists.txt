@@ -25,24 +25,25 @@ if(USE_ONNXRUNTIME)
 endif()
 
 add_executable(
-    yolov8_img_demo
-    yolov8_img_demo.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/app/detect/yolo.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/app/detect/yolo_postprocess/postprocess.cpp
+    yolov8_demo
+    ${CMAKE_CURRENT_SOURCE_DIR}/demo/yolov8_demo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolov8.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/preprocess.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/yolov8_postprocess.cpp
 )
-target_link_libraries(yolov8_img_demo PRIVATE inference_engine)
+target_link_libraries(yolov8_demo PRIVATE inference_engine)
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
 file(GLOB_RECURSE DEEPSORT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/app/tracker/botsort/*.cpp)
 
-add_executable(
-    yolov8_video_demo
-    yolov8_video_demo.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/app/detect/yolo.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/app/detect/yolo_postprocess/postprocess.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/app/feature/ReID.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/app/tracker/deepsort/deepsort.cpp
+# add_executable(
+#     yolov8_video_demo
+#     ${CMAKE_CURRENT_SOURCE_DIR}/demo/yolov8_video_demo.cpp
+#     ${CMAKE_CURRENT_SOURCE_DIR}/app/detect/yolo.cpp
+#     ${CMAKE_CURRENT_SOURCE_DIR}/app/detect/yolo_postprocess/postprocess.cpp
+#     ${CMAKE_CURRENT_SOURCE_DIR}/app/feature/ReID.cpp
+#     ${CMAKE_CURRENT_SOURCE_DIR}/app/tracker/deepsort/deepsort.cpp
 
-)
-target_link_libraries(yolov8_video_demo PRIVATE inference_engine Eigen3::Eigen)
+# )
+# target_link_libraries(yolov8_video_demo PRIVATE inference_engine Eigen3::Eigen)

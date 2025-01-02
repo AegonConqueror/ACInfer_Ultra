@@ -77,10 +77,12 @@ namespace iTime {
 
 namespace iDraw {
     void draw_box_label(
-        cv::Mat &img, const cv::Rect_<float> &box, 
+        cv::Mat &img, const cv::Rect_<float> box, 
         const int class_id, const float conf,
         const std::vector<std::string> &class_names={}
     );
+
+    void draw_mask(cv::Mat &img, const cv::Rect_<float> &box, cv::Mat &roi);
 } // namespace iDraw
 
 

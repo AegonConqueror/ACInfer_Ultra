@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <random>
 
 namespace iLog {
 
@@ -80,7 +81,7 @@ namespace iTools {
         return result;
     }
     
-    float* halfToFloat(void* pred_half, std::vector<int> shape){
+    float* halfToFloat(void* pred_half, std::vector<int> shape) {
         size_t size = 1;
         for (auto dim : shape){
             size = size * dim;
@@ -297,7 +298,7 @@ namespace iDraw {
     };
 
     void draw_box_label(
-        cv::Mat &img, const cv::Rect_<float> &box, 
+        cv::Mat &img, const cv::Rect_<float> box, 
         const int class_id, const float conf,
         const std::vector<std::string> &class_names
     ) {
@@ -326,6 +327,18 @@ namespace iDraw {
         cv::rectangle(img, cv::Point(box.x, box.y), cv::Point(box.x + w, text_origin.y), box_color, -1, cv::LINE_AA);
         cv::Point t = outside ? cv::Point(box.x, box.y - 2) : cv::Point(box.x, box.y + h + 2);
         cv::putText(img, draw_string, t, cv::FONT_HERSHEY_SIMPLEX, sf, text_color, tf, cv::LINE_AA);
+    }
+
+    void draw_mask(cv::Mat &img, const cv::Rect_<float> &box, cv::Mat &roi) {
+        cv::Mat seg_mask_item = cv::Mat::zeros(img.rows, img.cols, CV_8UC3);
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<int> dis(0, 255);
+        cv::Scalar seg_color(dis(gen), dis(gen), dis(gen));
+
+        seg_mask_item(box).setTo(seg_color, roi);
+        cv::addWeighted(img, 1, seg_mask_item, 0.45, 0, img);
     }
 } // namespace iDraw
 

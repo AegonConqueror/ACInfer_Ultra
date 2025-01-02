@@ -15,7 +15,7 @@
 #include <string>
 #include <memory>
 
-#include "types/ACType.h"
+#include "types/error.h"
 #include "utils/utils.h"
 
 typedef int MemorySize;
