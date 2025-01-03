@@ -13,7 +13,7 @@ public:
 
     virtual void        Print() override;
     virtual void        BindingInput(InferenceDataType& inputData) override;
-    virtual void        GetInferOutput(InferenceDataType& outputData) override;
+    virtual void        GetInferOutput(InferenceDataType& outputData, bool sync) override;
 
     virtual std::vector<int>                GetInputShape(int index) override;
     virtual std::vector<std::vector<int>>   GetOutputShapes() override;
@@ -240,7 +240,7 @@ void ONNXEngine::BindingInput(InferenceDataType& inputData) {
     }
 }
 
-void ONNXEngine::GetInferOutput(InferenceDataType& outputData) {
+void ONNXEngine::GetInferOutput(InferenceDataType& outputData, bool sync) {
     outputTensors = m_session->Run(
         Ort::RunOptions{nullptr}, 
         m_inputNodeNames.data(), 

@@ -27,7 +27,7 @@ public:
 
     virtual void        Print() = 0;
     virtual void        BindingInput(InferenceDataType& inputData) = 0;
-    virtual void        GetInferOutput(InferenceDataType& outputData) = 0;
+    virtual void        GetInferOutput(InferenceDataType& outputData, bool sync = true) = 0;
 
     virtual std::vector<int>                GetInputShape(int index = 0) = 0;
     virtual std::vector<std::vector<int>>   GetOutputShapes() = 0;

@@ -93,9 +93,9 @@ namespace TRT {
          * @brief 计算给定索引数组所表示的元素在张量中的偏移量
          */
         template<typename ... Args>
-        int offset(Args ... index_args) const{
-            const int index_array[] = {index_args...};
-            return offset_array(sizeof...(index_args), index_array);
+        int offset(int index, Args ... index_args) const{
+            const int index_array[] = {index, index_args...};
+            return offset_array(sizeof...(index_args) + 1, index_array);
         }
         int offset_array(const std::vector<int>& index) const;
         int offset_array(size_t size, const int* index_array) const;
@@ -104,9 +104,9 @@ namespace TRT {
          * @brief 重新调整张量的维度和形状，并重新计算张量的步幅（strides）以及相应的内存布局
          */
         template<typename ... Args>
-        Tensor& resize(Args ... dim_args) {
-            const int dim_size_array[] = {dim_args...};
-            return resize(sizeof...(dim_args), dim_size_array);
+        Tensor& resize(int dim_size, Args ... dim_size_args){
+            const int dim_size_array[] = {dim_size, dim_size_args...};
+            return resize(sizeof...(dim_size_args) + 1, dim_size_array);
         }
         Tensor& resize(int ndims, const int* dims);
         Tensor& resize(const std::vector<int>& dims);

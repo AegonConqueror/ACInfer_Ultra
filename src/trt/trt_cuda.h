@@ -25,6 +25,11 @@
 		}                                       \
 	}while(false)
 
+template<typename _T>
+std::shared_ptr<_T> make_nvshared(_T* ptr){
+    return std::shared_ptr<_T>(ptr, [](_T* p){p->destroy();});
+}
+
 namespace iCUDA {
 
     bool check_runtime(cudaError_t e, const char* call, int iLine, const char *szFile);

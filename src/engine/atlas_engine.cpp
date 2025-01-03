@@ -14,7 +14,7 @@ public:
 
     virtual void        Print() override;
     virtual void        BindingInput(InferenceDataType& inputData) override;
-    virtual void        GetInferOutput(InferenceDataType& outputData) override;
+    virtual void        GetInferOutput(InferenceDataType& outputData, bool sync) override;
 
     virtual std::vector<int>                GetInputShape(int index) override;
     virtual std::vector<std::vector<int>>   GetOutputShapes() override;
@@ -409,7 +409,7 @@ void AtlasEngine::BindingInput(InferenceDataType& inputData) {
     }
 }
 
-void AtlasEngine::GetInferOutput(InferenceDataType& outputData) {
+void AtlasEngine::GetInferOutput(InferenceDataType& outputData, bool sync) {
     auto pred_num = aclmdlGetDatasetNumBuffers(output_);
     outputData.reserve(pred_num);
     for (size_t i = 0; i < pred_num; ++i) {

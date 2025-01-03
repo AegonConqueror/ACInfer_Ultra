@@ -1,9 +1,11 @@
 
 #include "utils.h"
-
+#include <stddef.h>
 #include <fstream>
 #include <stdarg.h>
 #include <chrono>
+#include <dirent.h>
+#include <unistd.h>
 #include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -99,6 +101,42 @@ namespace iTools {
 } // namespace iTools
 
 namespace iFile {
+
+    bool mkdir(const std::string& path){
+        return ::mkdir(path.c_str(), 0755) == 0;
+    }
+
+    bool mkdirs(const std::string& path){
+        if (path.empty()) return false;
+        if (exists(path)) return true;
+
+        std::string _path = path;
+        char* dir_ptr = (char*)_path.c_str();
+        char* iter_ptr = dir_ptr;
+        
+        bool keep_going = *iter_ptr not_eq 0;
+        while (keep_going){
+            if (*iter_ptr == 0)
+                keep_going = false;
+            
+            if ((*iter_ptr == '/' and iter_ptr not_eq dir_ptr) or *iter_ptr == 0){
+                char old = *iter_ptr;
+                *iter_ptr = 0;
+                if (!exists(dir_ptr)){
+                    if (!mkdir(dir_ptr)){
+                        if(!exists(dir_ptr)){
+                            LOG_ERROR("mkdirs %s return false.", dir_ptr);
+                            return false;
+                        }
+                    }
+                }
+                *iter_ptr = old;
+            }
+            iter_ptr++;
+        }
+        return true;
+    }
+
     std::string file_name(const std::string& path, bool include_suffix){
         if (path.empty()) return "";
 
@@ -114,6 +152,10 @@ namespace iFile {
 
         if (u <= p) u = path.size();
         return path.substr(p, u - p);
+    }
+
+    bool exists(const std::string& path){
+        return access(path.c_str(), R_OK) == 0;
     }
 
     std::vector<uint8_t> load_file(const std::string& file){
@@ -181,6 +223,35 @@ namespace iFile {
         binFile.read(static_cast<char*>(inputBuff), binFileBufferLen);
         binFile.close();
         fileSize = binFileBufferLen;
+    }
+
+    bool save_file(const std::string& file, const void* data, size_t length, bool mk_dirs){
+        if (mk_dirs){
+            int p = (int)file.rfind('/');
+            if (p not_eq -1){
+                if (!mkdirs(file.substr(0, p)))
+                    return false;
+            }
+        }
+        FILE* f = fopen(file.c_str(), "wb");
+        if (!f) return false;
+
+        if (data and length > 0){
+            if (fwrite(data, 1, length, f) not_eq length){
+                fclose(f);
+                return false;
+            }
+        }
+        fclose(f);
+        return true;
+    }
+
+    bool save_file(const std::string& file, const std::vector<uint8_t>& data, bool mk_dirs){
+        return save_file(file, data.data(), data.size(), mk_dirs);
+    }
+
+    bool save_file(const std::string& file, const std::string& data, bool mk_dirs){
+        return save_file(file, data.data(), data.size(), mk_dirs);
     }
     
 } // namespace iFile

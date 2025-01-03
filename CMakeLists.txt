@@ -25,7 +25,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib/")
 # 静态库
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib/")
 
-option(USE_TENSORRT     "option for open tensorrt inference api"    OFF)
+option(USE_TENSORRT     "option for open tensorrt inference api"    ON)
 option(USE_ONNXRUNTIME  "option for open onnxruntime inference api" ON)
 option(USE_ATALS        "option for open atals inference api"       OFF)
 
@@ -104,6 +104,7 @@ endif(USE_ATALS)
 include_directories(
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/src/app
+    ${PROJECT_SOURCE_DIR}/src/engine
 )
 
 add_subdirectory(src)

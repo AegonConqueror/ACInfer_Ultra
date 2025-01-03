@@ -17,3 +17,4 @@ lib/*
 om/*
 *.sh
 src/demo/*
+engine/*

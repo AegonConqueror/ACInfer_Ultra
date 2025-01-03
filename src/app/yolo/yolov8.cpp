@@ -1,7 +1,7 @@
 
 #include "yolov8.h"
 
-#include "engine/engine.h"
+#include "engine.h"
 #include "process/preprocess.h"
 #include "process/yolov8_postprocess.h"
 
@@ -87,7 +87,7 @@ namespace YOLOv8 {
         size_t output_num = infer_output_data.size();
 
         auto output_shapes = engine_->GetOutputShapes();
-        auto class_num = output_shapes[1][1];
+        auto class_num = output_shapes[3][1];
 
         void* output_data[output_num];
 

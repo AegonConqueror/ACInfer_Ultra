@@ -59,12 +59,37 @@ namespace iTools {
 
 namespace iFile {
     
+    /**
+     * @brief  从给定路径中提取文件名
+     */
     std::string file_name(const std::string& path, bool include_suffix=true);
+
+    /**
+     * @brief  查看文件吃否存在
+     */
+    bool exists(const std::string& path);
+
+    /**
+     * @brief 加载模型文件
+     */
     std::vector<uint8_t> load_file(const std::string& file);
+
+
     std::string directory(const std::string& path);
 
+    /**
+     * @brief 在指定目录中查找图片文件
+     */
     std::vector<std::string> find_files(const std::string& directory);
+    
     void read_bin(const std::string &fileName, void *&inputBuff, uint32_t &fileSize);
+
+    /**
+     * @brief 保存文件
+     */
+    bool save_file(const std::string& file, const void* data, size_t length, bool mk_dirs = true);
+    bool save_file(const std::string& file, const std::vector<uint8_t>& data, bool mk_dirs = true);
+    bool save_file(const std::string& file, const std::string& data, bool mk_dirs = true);
     
 } // namespace iFile
 
