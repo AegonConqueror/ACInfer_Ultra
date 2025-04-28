@@ -94,8 +94,7 @@ namespace TRT {
             checkCudaRuntime(cudaStreamDestroy(stream_));
         }
 
-        int32_t getBatchSize() const noexcept override
-        {
+        int32_t getBatchSize() const noexcept override {
             return dims_.d[0];
         }
 
@@ -117,8 +116,7 @@ namespace TRT {
                 return true;
         }
 
-        bool getBatch(void *bindings[], const char *names[], int nbBindings) noexcept override
-        {
+        bool getBatch(void *bindings[], const char *names[], int nbBindings) noexcept override {
             if (!next()) return false;
             bindings[0] = tensor_->gpu();
             return true;

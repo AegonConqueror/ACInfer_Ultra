@@ -64,6 +64,13 @@ add_executable(
 )
 target_link_libraries(yolov8_demo PRIVATE inference_engine)
 
+add_executable(
+    kxwell_pose_demo
+    ${CMAKE_CURRENT_SOURCE_DIR}/demo/kxwell_pose_demo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolov8pose.cpp
+)
+target_link_libraries(kxwell_pose_demo PRIVATE inference_engine)
+
 # find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
 # file(GLOB_RECURSE DEEPSORT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/app/tracker/botsort/*.cpp)

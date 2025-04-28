@@ -33,8 +33,6 @@ namespace yolov8 {
     int mask_seg_h = 160;
     int keypoint_num = 17;
 
-    
-
     static inline float fast_exp(float x) {
         union
         {
@@ -117,7 +115,7 @@ namespace yolov8 {
 
                     float cls_val = sigmoid(cls[cl * grid_w * grid_h + h * grid_h + w]);
 
-                    if (0 == cl) {
+                    if (cl == 0) {
                         cls_max = cls_val;
                         cls_index = cl;
                     } else {
@@ -304,7 +302,7 @@ namespace yolov8 {
                 cls_index, gridIndex, index, class_num, conf_thres
             );
         }
-
+ 
         std::sort(
             detect_results.begin(), detect_results.end(),
             [](Yolov8Rect &Rect1, Yolov8Rect &Rect2) -> bool
@@ -429,7 +427,7 @@ namespace yolov8 {
         for (int index = 0; index < headNum; index++) {
             float* reg  = (float* )preds[index * 2 + 0];
             float* cls  = (float* )preds[index * 2 + 1];
-            float* msk = (float* )preds[index + headNum * 2];
+            float* msk  = (float* )preds[index + headNum * 2];
 
             process_seg(
                 cls, reg, msk, seg_results, meshgrid, input_w, input_h, 
