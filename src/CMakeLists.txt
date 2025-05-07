@@ -15,6 +15,8 @@ endif(USE_ATALS)
 
 if(USE_TENSORRT)
 
+    add_subdirectory(plugin)
+
     include_directories(${TensorRT_INCLUDE_DIR})
     include_directories(${CUDA_INCLUDE_DIR})
 
@@ -35,9 +37,10 @@ if(USE_TENSORRT)
         ${CMAKE_CURRENT_SOURCE_DIR}/engine/builder/trt_builder.cpp
     )
     target_link_libraries(build_trt_engine PRIVATE tensorrt_utils)
+    target_link_libraries(build_trt_engine PRIVATE -Wl,--no-as-needed customLayerPlugin)
+    set_target_properties(build_trt_engine PROPERTIES CUDA_ARCHITECTURES "61;70;75")
 
 endif(USE_TENSORRT)
-
 
 add_library(
     inference_engine
