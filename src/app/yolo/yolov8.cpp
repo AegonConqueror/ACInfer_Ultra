@@ -42,8 +42,12 @@ namespace YOLOv8 {
     private:
         std::shared_ptr<ACEngine>   engine_;
         TaskType                    task_type_;
-        std::vector<int>            input_shape_;
-        LetterBoxInfo               letterbox_info_;   
+        LetterBoxInfo               letterbox_info_;
+
+        ac_engine_attr              input_attr_;
+        ac_engine_attrs             output_attrs_;
+
+        int                         model_class_num_;
     };
 
     error_e ModelImpl::Load(const std::string &model_path, const TaskType task_type, bool use_plugin) {
@@ -55,13 +59,16 @@ namespace YOLOv8 {
         }
 
         engine_->Print();
-        input_shape_    = engine_->GetInputShape();
+        input_attr_    = engine_->GetInputAttrs()[0];
+        output_attrs_ = engine_->GetOutputAttrs();
+
+        model_class_num_ = output_attrs_[1].dims[1];
         return SUCCESS;
     }
 
     error_e ModelImpl::preprocess(const cv::Mat &src_frame, cv::Mat &dst_frame, cv::Mat &timg) {
-        int input_w     = input_shape_[3];
-        int input_h     = input_shape_[2];
+        int input_w     = input_attr_.dims[3];
+        int input_h     = input_attr_.dims[2];
         
         float wh_ratio = (float)input_w / (float)input_h;
         letterbox_info_ = letterbox(src_frame, dst_frame, wh_ratio);
@@ -76,21 +83,17 @@ namespace YOLOv8 {
     }
 
     error_e ModelImpl::postprocess(const cv::Mat &frame, std::vector<yolov8_result> &objects) {
-        int input_w     = input_shape_[3];
-        int input_h     = input_shape_[2];
+        int input_w     = input_attr_.dims[3];
+        int input_h     = input_attr_.dims[2];
         int image_w     = frame.cols;
         int image_h     = frame.rows;
 
-        InferenceDataType infer_output_data;
+        InferenceData infer_output_data;
         engine_->GetInferOutput(infer_output_data);
 
         size_t output_num = infer_output_data.size();
 
-        auto output_shapes = engine_->GetOutputShapes();
-        auto class_num = output_shapes[3][1];
-
         void* output_data[output_num];
-
         for (size_t i = 0; i < output_num; i++) {
             output_data[i] = (void*)infer_output_data[i].first;
         }
@@ -103,14 +106,14 @@ namespace YOLOv8 {
         if (task_type_ == TaskType::YOLOv8_DET) {
             yolov8::PostprocessSplit_DET(
                 (float **)output_data, detectiont_rects,
-                input_w, input_h, class_num
+                input_w, input_h, model_class_num_
             );
         }
         
         if (task_type_ == TaskType::YOLOv8_POSE) {
             yolov8::PostprocessSplit_POSE(
                 (float **)output_data, detectiont_rects,
-                pose_keypoints, input_w, input_h, class_num
+                pose_keypoints, input_w, input_h, model_class_num_
             );
 
             for (auto &kp : pose_keypoints) {
@@ -124,7 +127,7 @@ namespace YOLOv8 {
         if (task_type_ == TaskType::YOLOv8_SEG) {
             yolov8::PostprocessSplit_SEG(
                 (float **)output_data, detectiont_rects,
-                seg_masks, input_w, input_h, class_num
+                seg_masks, input_w, input_h, model_class_num_
             );
         }
 
@@ -167,7 +170,7 @@ namespace YOLOv8 {
             return ret;
         }
 
-        InferenceDataType infer_input_data;
+        InferenceData infer_input_data;
         infer_input_data.emplace_back(
             std::make_pair((void *)timg.ptr<float>(), timg.total() * timg.elemSize())
         );

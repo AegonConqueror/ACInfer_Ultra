@@ -74,6 +74,18 @@ add_executable(
 )
 target_link_libraries(kxwell_pose_demo PRIVATE inference_engine)
 
+if(USE_TENSORRT)
+    add_executable(
+        plugin_demo
+        ${CMAKE_CURRENT_SOURCE_DIR}/demo/plugin_demo.cpp
+    )
+    target_link_libraries(plugin_demo PRIVATE inference_engine)
+    target_link_libraries(plugin_demo PRIVATE -Wl,--no-as-needed customLayerPlugin)
+    set_target_properties(plugin_demo PROPERTIES CUDA_ARCHITECTURES "61;70;75")
+endif()
+
+
+
 # find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
 # file(GLOB_RECURSE DEEPSORT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/app/tracker/botsort/*.cpp)

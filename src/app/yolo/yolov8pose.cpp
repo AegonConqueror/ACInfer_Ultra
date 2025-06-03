@@ -135,6 +135,11 @@ namespace POSEv8 {
         std::shared_ptr<ACEngine>   engine_;
         std::vector<int>            input_shape_;
         cv::Vec4d                   letterbox_info_;
+
+        ac_engine_attr              input_attr_;
+        ac_engine_attrs             output_attrs_;
+
+        int                         model_class_num_;
     };
 
     error_e ModelImpl::Load(const std::string &model_path, bool use_plugin) {
@@ -145,7 +150,10 @@ namespace POSEv8 {
         }
 
         engine_->Print();
-        input_shape_    = engine_->GetInputShape();
+        input_attr_    = engine_->GetInputAttrs()[0];
+        output_attrs_ = engine_->GetOutputAttrs();
+
+        model_class_num_ = output_attrs_[1].dims[1];
         return SUCCESS;
     }
 
@@ -169,11 +177,10 @@ namespace POSEv8 {
 
     error_e ModelImpl::postprocess(std::vector<yolov8_result> &objects) {
 
-        InferenceDataType infer_output_data;
+        InferenceData infer_output_data;
         engine_->GetInferOutput(infer_output_data);
 
-        auto output_shapes = engine_->GetOutputShapes();
-        auto rows = output_shapes[0][2];
+        auto rows = output_attrs_[0].dims[2];
 
         int nc = 2;
     	int nKeyCnt = 17;
@@ -265,7 +272,7 @@ namespace POSEv8 {
             return ret;
         }
 
-        InferenceDataType infer_input_data;
+        InferenceData infer_input_data;
         infer_input_data.emplace_back(
             std::make_pair((void *)timg.ptr<float>(), timg.total() * timg.elemSize())
         );

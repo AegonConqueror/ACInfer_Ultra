@@ -181,7 +181,7 @@ namespace yolov8 {
                         }
                     }
                 }
-
+ 
                 if (cls_max > conf_thres) {
                     Yolov8Rect temp;
 

@@ -2,6 +2,86 @@
 #include "engine.h"
 #include <onnxruntime_cxx_api.h>
 
+static ac_tensor_type_e engine_type_convert(ONNXTensorElementDataType type) {
+    switch (type)
+    {
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT:
+        return AC_TENSOR_FLOAT;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16:
+        return AC_TENSOR_FLOAT16;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8:
+        return AC_TENSOR_UINT8;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8:
+        return AC_TENSOR_INT8;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16:
+        return AC_TENSOR_INT16;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32:
+        return AC_TENSOR_INT32;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64:
+        return AC_TENSOR_INT64;
+    default:
+        LOG_ERROR("unsupported rknn type: %d\n", type);
+        exit(1);
+    }
+}
+
+static ONNXTensorElementDataType engine_type_convert(ac_tensor_type_e type) {
+    switch (type)
+    {
+    case AC_TENSOR_FLOAT:
+        return ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+    case AC_TENSOR_FLOAT16:
+        return ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
+    case AC_TENSOR_UINT8:
+        return ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;
+    case AC_TENSOR_INT8:
+        return ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8;
+    case AC_TENSOR_INT16:
+        return ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16;
+    case AC_TENSOR_INT32:
+        return ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;
+    case AC_TENSOR_INT64:
+        return ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64;
+    default:
+        LOG_ERROR("unsupported rknn type: %d\n", type);
+        exit(1);
+    }
+}
+
+static ac_engine_attr engine_tensor_attr_encode(
+    const int index,
+    const char *name,
+    const Ort::TypeInfo &typeInfo
+) {
+    ac_engine_attr shape;
+
+    auto tensorInfo = typeInfo.GetTensorTypeAndShapeInfo();
+
+    auto type = tensorInfo.GetElementType();
+    auto inputDims = tensorInfo.GetShape();
+    inputDims[0] = 1;
+
+    auto n_elems = std::accumulate(std::begin(inputDims), std::end(inputDims), 1, std::multiplies<int64_t>());
+
+    shape.index = index;
+    shape.name = name;
+    shape.n_dims = inputDims.size();
+    for (int i = 0; i < inputDims.size(); ++i) {
+        shape.dims[i] = inputDims[i];
+    }
+
+    shape.n_elems = n_elems;
+    shape.size = n_elems;
+    
+    shape.qnt_zp = 0;
+    shape.qnt_scale = .0f;
+
+    shape.type = engine_type_convert(type);
+    shape.layout = AC_TENSOR_NCHW;
+
+    return shape;
+}
+
 class ONNXEngine : public ACEngine {
 public:
     ONNXEngine(): m_env(Ort::Env(ORT_LOGGING_LEVEL_WARNING, "ONNXEngine")),
@@ -9,16 +89,14 @@ public:
 
     ~ONNXEngine() override { destory(); };
 
-    error_e init(const std::string &file);
+    error_e create(const std::string &file);
 
     virtual void        Print() override;
-    virtual void        BindingInput(InferenceDataType& inputData) override;
-    virtual void        GetInferOutput(InferenceDataType& outputData, bool sync) override;
+    virtual void        BindingInput(InferenceData &inputData) override;
+    virtual void        GetInferOutput(InferenceData &outputData, bool sync) override;
 
-    virtual std::vector<int>                GetInputShape(int index) override;
-    virtual std::vector<std::vector<int>>   GetOutputShapes() override;
-    virtual std::string                     GetInputType(int index) override;
-    virtual std::vector<std::string>        GetOutputTypes() override;
+    virtual const ac_engine_attrs   GetInputAttrs()     override;
+    virtual const ac_engine_attrs   GetOutputAttrs()    override;
 
 private:
     void destory();
@@ -27,35 +105,44 @@ private:
     std::vector<ONNXTensorElementDataType>  input_types;
     std::vector<ONNXTensorElementDataType>  output_types;
 
-    Ort::Session*                           m_session = nullptr;
+    Ort::Session *m_session = nullptr;
+
     Ort::Env        						m_env;
     Ort::AllocatorWithDefaultOptions 		m_ortAllocator;
 
-    uint8_t 								m_numInputs;
-    uint8_t 								m_numOutputs;
-    std::vector<char*> 						m_inputNodeNames;
-    std::vector<char*> 						m_outputNodeNames;
-    std::vector<int64_t> 					m_inputTensorSizes;
-    std::vector<int64_t> 					m_outputTensorSizes;
-    std::vector<std::vector<int64_t>> 		m_inputShapes;
-    std::vector<std::vector<int64_t>> 		m_outputShapes;
+    std::vector<char *> 						inputNodeNames_;
+    std::vector<char *> 						outputNodeNames_;
 
     Ort::SessionOptions 					sessionOptions;
     Ort::MemoryInfo                         memoryInfo;
 
     std::vector<Ort::Value> inputTensors;
 	std::vector<Ort::Value> outputTensors;
+
+    uint32_t input_num_;
+    uint32_t output_num_;
+
+    std::vector<ac_engine_attr> input_attrs_;
+    std::vector<ac_engine_attr> output_attrs_;
 };
 
-
-inline std::string data_type_string(ONNXTensorElementDataType dt){
+inline std::string data_type_string(ac_tensor_type_e dt){
     switch(dt){
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT:   return "Float";
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16: return "Float16";
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8:   return "UInt8";
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8:    return "Int8";
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32:   return "Int32";
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64:   return "Int64";
+        case AC_TENSOR_FLOAT:   return "Float";
+        case AC_TENSOR_FLOAT16: return "Float16";
+        case AC_TENSOR_UINT8:   return "UInt8";
+        case AC_TENSOR_INT8:    return "Int8";
+        case AC_TENSOR_INT16:   return "Int16";
+        case AC_TENSOR_INT32:   return "Int32";
+        case AC_TENSOR_INT64:   return "Int64";
+        default: return "Unknow";
+    }
+}
+
+inline std::string data_format_string(ac_tensor_fmt_e dt){
+    switch(dt){
+        case AC_TENSOR_NCHW:   return "NCHW";
+        case AC_TENSOR_NHWC:   return "NHWC";
         default: return "Unknow";
     }
 }
@@ -77,73 +164,52 @@ void ONNXEngine::destory() {
     m_session = nullptr;
     sessionOptions.release();
     m_env.release();
-    m_inputShapes.clear();
-    m_outputShapes.clear();
-    m_inputTensorSizes.clear();
-    m_outputTensorSizes.clear();
 
-    for(int i = 0; i < m_inputNodeNames.size(); i++){
-        free(m_inputNodeNames[i]);
+    for(int i = 0; i < inputNodeNames_.size(); i++){
+        free(inputNodeNames_[i]);
     }
-    m_inputNodeNames.clear();
+    inputNodeNames_.clear();
 
-    for(int i = 0; i < m_outputNodeNames.size(); i++){
-        free(m_outputNodeNames[i]);
+    for(int i = 0; i < outputNodeNames_.size(); i++){
+        free(outputNodeNames_[i]);
     }
-    m_outputNodeNames.clear();
+    outputNodeNames_.clear();
 }
 
 void ONNXEngine::Print() {
     LOG_INFO("****************************************************************************");
     LOG_INFO("Infer %p detail", this);
-    LOG_INFO("\tInputs: %d", m_numInputs);
-    for(int i = 0; i < m_numInputs; ++i){
-        auto input_shape = m_inputShapes[i];
-        LOG_INFO("\t\t%d.%s : shape {%s}, %s", i, m_inputNodeNames[i], iTools::vector_shape_string(input_shape).c_str(), data_type_string(input_types[i]).c_str());
+    LOG_INFO("\tInputs: %d", input_num_);
+    for(int i = 0; i < input_num_; ++i){
+        auto input_attr = input_attrs_[i];
+        std::vector<int64_t> shapes_(input_attr.dims, input_attr.dims + input_attr.n_dims);
+        LOG_INFO(
+            "\t\t%d.%s : shape {%s}, %s, fmt %s, size %d", 
+            i, input_attrs_[i].name.c_str(), 
+            iTools::vector_shape_string(shapes_).c_str(), 
+            data_type_string(input_attr.type).c_str(),
+            data_format_string(input_attr.layout).c_str(),
+            input_attr.size
+        );
     }
 
-    LOG_INFO("\tOutputs: %d", m_numOutputs);
-    for(int i = 0; i < m_numOutputs; ++i){
-        auto output_shape = m_outputShapes[i];
-        LOG_INFO("\t\t%d.%s : shape {%s}, %s", i, m_outputNodeNames[i], iTools::vector_shape_string(output_shape).c_str(), data_type_string(output_types[i]).c_str());
+    LOG_INFO("\tOutputs: %d", output_num_);
+    for(int i = 0; i < output_num_; ++i){
+        auto output_attr = output_attrs_[i];
+        std::vector<int64_t> shapes_(output_attr.dims, output_attr.dims + output_attr.n_dims);
+        LOG_INFO(
+            "\t\t%d.%s : shape {%s}, %s, fmt %s, size %d", 
+            i, output_attrs_[i].name.c_str(), 
+            iTools::vector_shape_string(shapes_).c_str(), 
+            data_type_string(output_attr.type).c_str(),
+            data_format_string(output_attr.layout).c_str(),
+            output_attr.size
+        );
     }
     LOG_INFO("****************************************************************************");
 }
 
-std::vector<int> ONNXEngine::GetInputShape(int index) {
-    std::vector<int> output;
-    output.reserve(m_inputShapes[index].size());
-    for (int64_t val : m_inputShapes[index]) {
-        output.push_back(static_cast<int>(val));
-    }
-    return output;
-}
-
-std::vector<std::vector<int>> ONNXEngine::GetOutputShapes() {
-    std::vector<std::vector<int>> output;
-    for (const auto& vec64 : m_outputShapes) {
-        std::vector<int> vec;
-        for (const auto& val64 : vec64) {
-            vec.push_back(static_cast<int>(val64));
-        }
-        output.push_back(vec);
-    }
-    return output;
-}
-
-std::string ONNXEngine::GetInputType(int index){
-    return data_type_string(input_types[index]);
-}
-
-std::vector<std::string> ONNXEngine::GetOutputTypes(){
-    std::vector<std::string> output_chars;
-    for (auto output_type : output_types){
-        output_chars.push_back(data_type_string(output_type));
-    }
-    return output_chars;
-}
-
-error_e ONNXEngine::init(const std::string &file) {
+error_e ONNXEngine::create(const std::string &file) {
 
     sessionOptions.SetGraphOptimizationLevel(ORT_ENABLE_BASIC);
     sessionOptions.SetLogSeverityLevel(4);
@@ -152,64 +218,46 @@ error_e ONNXEngine::init(const std::string &file) {
 
     m_session = new Ort::Session(m_env, file.c_str(), sessionOptions);
     
-    m_numInputs = m_session->GetInputCount();
-    m_inputNodeNames.reserve(m_numInputs);
-    m_inputTensorSizes.reserve(m_numInputs);
+    input_num_ = m_session->GetInputCount();
+    inputNodeNames_.reserve(input_num_);
+    input_attrs_.reserve(input_num_);
 
-    m_numOutputs = m_session->GetOutputCount();
-    m_outputNodeNames.reserve(m_numOutputs);
-    m_outputTensorSizes.reserve(m_numOutputs);
-
-
-    input_types.clear();
-    input_types.reserve(m_numInputs);
-    for (size_t i = 0; i < m_numInputs; i++) {
+    // 输入属性
+    for (size_t i = 0; i < input_num_; i++) {
         Ort::TypeInfo typeInfo = m_session->GetInputTypeInfo(i);
-        auto tensorInfo = typeInfo.GetTensorTypeAndShapeInfo();
-        input_types.push_back(tensorInfo.GetElementType());
-        auto inputDims = tensorInfo.GetShape();
-        inputDims[0] = 1;
-        m_inputShapes.emplace_back(inputDims);
-
-        const auto& curInputShape = m_inputShapes[i];
-
-        m_inputTensorSizes.emplace_back(
-            std::accumulate(std::begin(curInputShape), std::end(curInputShape), 1, std::multiplies<int64_t>())
-        );
         auto inputName = m_session->GetInputNameAllocated(i, m_ortAllocator);
-        m_inputNodeNames.emplace_back(strdup(inputName.get()));
+        inputNodeNames_.emplace_back(strdup(inputName.get()));
+        input_attrs_.emplace_back(engine_tensor_attr_encode(i, strdup(inputName.get()), typeInfo));
     }
 
-    output_types.clear();
-    output_types.reserve(m_numOutputs);
-    for (size_t i = 0; i < m_numOutputs; i++) {
+    output_num_ = m_session->GetOutputCount();
+    outputNodeNames_.reserve(output_num_);
+    output_attrs_.reserve(output_num_);
+
+    // 输出属性
+    for (size_t i = 0; i < output_num_; i++) {
         Ort::TypeInfo typeInfo = m_session->GetOutputTypeInfo(i);
-        auto tensorInfo = typeInfo.GetTensorTypeAndShapeInfo();
-        output_types.push_back(tensorInfo.GetElementType());
-        m_outputShapes.emplace_back(tensorInfo.GetShape());
-
-        const auto& curOutputShape = m_outputShapes[i];
-
-        m_outputTensorSizes.emplace_back(
-            std::accumulate(std::begin(curOutputShape), std::end(curOutputShape), 1, std::multiplies<int64_t>())
-        );
         auto outputName = m_session->GetOutputNameAllocated(i, m_ortAllocator);
-        m_outputNodeNames.emplace_back(strdup(outputName.get()));
+        outputNodeNames_.emplace_back(strdup(outputName.get()));
+        output_attrs_.emplace_back(engine_tensor_attr_encode(i, strdup(outputName.get()), typeInfo));
     }
     
     return SUCCESS;
 }
 
-void ONNXEngine::BindingInput(InferenceDataType& inputData) {
-    if (m_numInputs != inputData.size()) {
-        LOG_ERROR("inputs num not match! inputs.size()=%ld, input_num_=%d", inputData.size(), m_numInputs);
+void ONNXEngine::BindingInput(InferenceData& inputData) {
+    if (input_num_ != inputData.size()) {
+        LOG_ERROR("inputs num not match! inputs.size()=%ld, input_num_=%d", inputData.size(), input_num_);
         exit(1);
     }
     inputTensors.clear();
-    inputTensors.reserve(m_numInputs);
+    inputTensors.reserve(input_num_);
 
-    for (size_t i = 0; i < m_numInputs; i++) {
-        auto input_type = input_types[i];
+    for (size_t i = 0; i < input_num_; i++) {
+        auto input_type = engine_type_convert(input_attrs_[i].type);
+        auto tensor_size = static_cast<int64_t>(input_attrs_[i].n_elems);
+        std::vector<int64_t> input_shape(input_attrs_[i].dims, input_attrs_[i].dims + input_attrs_[i].n_dims);
+
         if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
             // 半精度io
             inputTensors.emplace_back(
@@ -217,9 +265,9 @@ void ONNXEngine::BindingInput(InferenceDataType& inputData) {
                     Ort::Value::CreateTensor<Ort::Float16_t>(
                         memoryInfo, 
                         (Ort::Float16_t *)inputData[i].first,
-                        m_inputTensorSizes[i], 
-                        m_inputShapes[i].data(), 
-                        m_inputShapes[i].size()
+                        tensor_size,
+                        input_shape.data(), 
+                        input_shape.size()
                     )
                 )
             );
@@ -230,9 +278,9 @@ void ONNXEngine::BindingInput(InferenceDataType& inputData) {
                     Ort::Value::CreateTensor<float>(
                         memoryInfo, 
                         (float *)inputData[i].first,
-                        m_inputTensorSizes[i], 
-                        m_inputShapes[i].data(), 
-                        m_inputShapes[i].size()
+                        tensor_size,
+                        input_shape.data(), 
+                        input_shape.size()
                     )
                 )
             );
@@ -240,17 +288,17 @@ void ONNXEngine::BindingInput(InferenceDataType& inputData) {
     }
 }
 
-void ONNXEngine::GetInferOutput(InferenceDataType& outputData, bool sync) {
+void ONNXEngine::GetInferOutput(InferenceData& outputData, bool sync) {
     outputTensors = m_session->Run(
         Ort::RunOptions{nullptr}, 
-        m_inputNodeNames.data(), 
+        inputNodeNames_.data(), 
         inputTensors.data(),
-        m_numInputs, 
-        m_outputNodeNames.data(), 
-        m_numOutputs
+        input_num_,
+        outputNodeNames_.data(), 
+        output_num_
     );
 
-    outputData.reserve(m_numOutputs);
+    outputData.reserve(output_num_);
 
     for (auto& elem : outputTensors) {
 
@@ -279,9 +327,17 @@ void ONNXEngine::GetInferOutput(InferenceDataType& outputData, bool sync) {
     }
 }
 
+const ac_engine_attrs ONNXEngine::GetInputAttrs() {
+    return input_attrs_;
+}
+
+const ac_engine_attrs ONNXEngine::GetOutputAttrs() {
+    return output_attrs_;
+}
+
 std::shared_ptr<ACEngine> create_engine(const std::string &file_path, bool use_plugins) {
     std::shared_ptr<ONNXEngine> Instance(new ONNXEngine());
-    if (Instance->init(file_path) != SUCCESS) {
+    if (Instance->create(file_path) != SUCCESS) {
         Instance.reset();
     }
     return Instance;
