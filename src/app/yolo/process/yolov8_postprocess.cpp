@@ -175,7 +175,7 @@ namespace yolov8 {
                         cls_max = cls_val;
                         cls_index = cl;
                     } else {
-                        if (cls_val > cls_max) {
+                        if (cls_val > cls_max) {                                                                                                                                                                                                                                   
                             cls_max = cls_val;
                             cls_index = cl;
                         }
@@ -355,9 +355,9 @@ namespace yolov8 {
         std::vector<Yolov8Rect> pose_results;
 
         for (int index = 0; index < headNum; index++) {
-            float *reg  = (float* )preds[index * 2 + 0];
-            float *cls  = (float* )preds[index * 2 + 1];
-            float *pose = (float* )preds[index + headNum * 2];
+            float *reg  = (float *)preds[index * 2 + 0];
+            float *cls  = (float *)preds[index * 2 + 1];
+            float *pose = (float *)preds[index + headNum * 2];
 
             process_pose(
                 cls, reg, pose, pose_results, meshgrid, input_w, input_h, 

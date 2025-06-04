@@ -105,7 +105,8 @@ static ac_tensor_type_e engine_type_convert(TRT::DataType type) {
 static ac_engine_attr engine_tensor_attr_encode(
     const int index,
     const char *tensor_name,
-    const std::shared_ptr<TRT::Tensor> &trt_tensor) {
+    const std::shared_ptr<TRT::Tensor> &trt_tensor
+) {
     ac_engine_attr shape;
 
     shape.index = index;
@@ -141,6 +142,8 @@ public:
     virtual const ac_engine_attrs   GetInputAttrs()     override;
     virtual const ac_engine_attrs   GetOutputAttrs()    override;
 
+    virtual int GetOutputIndex(const std::string name) override;
+
 private:
     void destory();
     void synchronize();
@@ -162,6 +165,8 @@ private:
 
     std::vector<ac_engine_attr> input_attrs_;
     std::vector<ac_engine_attr> output_attrs_;
+
+    std::unordered_map<std::string, uint32_t> name_index_map_;
 };
 
 static TRT::DataType convert_trt_datatype(nvinfer1::DataType dt){
@@ -220,30 +225,28 @@ void TRTEngine::Print() {
     LOG_INFO("\tBase device: %s", iCUDA::device_description().c_str());
     LOG_INFO("\tMax Batch Size: %d", this->get_max_batch_size());
     LOG_INFO("\tInputs: %d", input_num_);
-    for(int i = 0; i < input_num_; ++i){
-        auto input_attr = input_attrs_[i];
-        std::vector<int64_t> shapes_(input_attr.dims, input_attr.dims + input_attr.n_dims);
+    for (const auto &attr : input_attrs_) {
+        std::vector<int64_t> shapes_(attr.dims, attr.dims + attr.n_dims);
         LOG_INFO(
             "\t\t%d.%s : shape {%s}, %s, fmt %s, size %d", 
-            i, input_attrs_[i].name.c_str(), 
+            attr.index, attr.name.c_str(), 
             iTools::vector_shape_string(shapes_).c_str(), 
-            data_type_string(input_attr.type).c_str(),
-            data_format_string(input_attr.layout).c_str(),
-            input_attr.size
+            data_type_string(attr.type).c_str(),
+            data_format_string(attr.layout).c_str(),
+            attr.size
         );
     }
 
     LOG_INFO("\tOutputs: %d", output_num_);
-    for(int i = 0; i < output_num_; ++i){
-        auto output_attr = output_attrs_[i];
-        std::vector<int64_t> shapes_(output_attr.dims, output_attr.dims + output_attr.n_dims);
+    for (const auto &attr : output_attrs_) {
+        std::vector<int64_t> shapes_(attr.dims, attr.dims + attr.n_dims);
         LOG_INFO(
             "\t\t%d.%s : shape {%s}, %s, fmt %s, size %d", 
-            i, output_attrs_[i].name.c_str(), 
+            attr.index, attr.name.c_str(), 
             iTools::vector_shape_string(shapes_).c_str(), 
-            data_type_string(output_attr.type).c_str(),
-            data_format_string(output_attr.layout).c_str(),
-            output_attr.size
+            data_type_string(attr.type).c_str(),
+            data_format_string(attr.layout).c_str(),
+            attr.size
         );
     }
     LOG_INFO("****************************************************************************");
@@ -299,6 +302,10 @@ error_e TRTEngine::create(const std::string &file) {
     bindingsPtr_.resize(orderdBlobs_.size());
     input_num_ = input_attrs_.size();
     output_num_ = output_attrs_.size();
+
+    for (size_t i = 0; i < output_num_; i++) {
+        name_index_map_[output_attrs_[i].name] = i;
+    }
     
     return SUCCESS;
 }
@@ -309,6 +316,15 @@ const ac_engine_attrs TRTEngine::GetInputAttrs() {
 
 const ac_engine_attrs TRTEngine::GetOutputAttrs() {
     return output_attrs_;
+}
+
+int TRTEngine::GetOutputIndex(const std::string name) {
+    auto it = name_index_map_.find(name);
+    if (it != name_index_map_.end()) {
+        return it->second;
+    } else {
+        return -1;
+    }
 }
 
 void TRTEngine::BindingInput(InferenceData& inputData) {
@@ -369,7 +385,7 @@ void TRTEngine::GetInferOutput(InferenceData& outputData, bool sync) {
     }
 
     for (auto output : outputs_) {
-        void* dataPtr = output->cpu();
+        void *dataPtr = output->cpu();
         auto output_type = output->type();
         auto elem_size = iTools::vectorProduct(output->dims());
         if (output_type == TRT::DataType::Float) {

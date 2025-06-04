@@ -54,18 +54,20 @@ typedef struct {
 typedef std::vector<ac_engine_attr> ac_engine_attrs;
 
 typedef int MemorySize;
-using InferenceData = std::vector<std::pair<void*, MemorySize>>;
+using InferenceData = std::vector<std::pair<void *, MemorySize>>;
 
 class ACEngine {
 public:
     virtual ~ACEngine() {};
 
-    virtual void        Print() = 0;
-    virtual void        BindingInput(InferenceData &inputData) = 0;
-    virtual void        GetInferOutput(InferenceData &outputData, bool sync=true) = 0;
+    virtual void Print() = 0;
+    virtual void BindingInput(InferenceData &inputData) = 0;
+    virtual void GetInferOutput(InferenceData &outputData, bool sync=true) = 0;
 
     virtual const ac_engine_attrs   GetInputAttrs()     = 0;
     virtual const ac_engine_attrs   GetOutputAttrs()    = 0;
+
+    virtual int GetOutputIndex(const std::string name)  = 0;
 };
 
 std::shared_ptr<ACEngine> create_engine(const std::string &file_path, bool use_plugins=false);

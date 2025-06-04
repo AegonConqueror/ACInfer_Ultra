@@ -62,7 +62,8 @@ namespace YOLOv8 {
         input_attr_    = engine_->GetInputAttrs()[0];
         output_attrs_ = engine_->GetOutputAttrs();
 
-        model_class_num_ = output_attrs_[1].dims[1];
+        int cls_index = engine_->GetOutputIndex("cls1");
+        model_class_num_ = output_attrs_[cls_index].dims[1];
         return SUCCESS;
     }
 
@@ -93,10 +94,7 @@ namespace YOLOv8 {
 
         size_t output_num = infer_output_data.size();
 
-        void* output_data[output_num];
-        for (size_t i = 0; i < output_num; i++) {
-            output_data[i] = (void*)infer_output_data[i].first;
-        }
+        void *output_data[output_num];
 
         std::vector<float> detectiont_rects;
         std::vector<std::map<int, KeyPoint>> pose_keypoints;
@@ -104,6 +102,14 @@ namespace YOLOv8 {
         cv::Mat seg_mask = cv::Mat::zeros(frame.rows, frame.cols, CV_8UC3);
 
         if (task_type_ == TaskType::YOLOv8_DET) {
+            std::vector<std::string> det_names = {"reg1", "cls1", "reg2", "cls2", "reg3", "cls3"};
+            
+            if (det_names.size() != output_num) return LOAD_MODEL_FAIL;
+
+            for (size_t i = 0; i < output_num; i++) {
+                output_data[i] = (void *)infer_output_data[engine_->GetOutputIndex(det_names[i])].first;
+            }
+
             yolov8::PostprocessSplit_DET(
                 (float **)output_data, detectiont_rects,
                 input_w, input_h, model_class_num_
@@ -111,6 +117,14 @@ namespace YOLOv8 {
         }
         
         if (task_type_ == TaskType::YOLOv8_POSE) {
+            std::vector<std::string> pose_names = {"reg1", "cls1", "reg2", "cls2", "reg3", "cls3", "ps1", "ps2", "ps3"};
+            
+            if (pose_names.size() != output_num) return LOAD_MODEL_FAIL;
+
+            for (size_t i = 0; i < output_num; i++) {
+                output_data[i] = (void *)infer_output_data[engine_->GetOutputIndex(pose_names[i])].first;
+            }
+
             yolov8::PostprocessSplit_POSE(
                 (float **)output_data, detectiont_rects,
                 pose_keypoints, input_w, input_h, model_class_num_
@@ -125,6 +139,14 @@ namespace YOLOv8 {
         } 
 
         if (task_type_ == TaskType::YOLOv8_SEG) {
+            std::vector<std::string> seg_names = {"reg1", "cls1", "reg2", "cls2", "reg3", "cls3", "mc1", "mc2", "mc3", "seg"};
+            
+            if (seg_names.size() != output_num) return LOAD_MODEL_FAIL;
+
+            for (size_t i = 0; i < output_num; i++) {
+                output_data[i] = (void *)infer_output_data[engine_->GetOutputIndex(seg_names[i])].first;
+            }
+
             yolov8::PostprocessSplit_SEG(
                 (float **)output_data, detectiont_rects,
                 seg_masks, input_w, input_h, model_class_num_

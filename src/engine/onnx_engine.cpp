@@ -98,6 +98,8 @@ public:
     virtual const ac_engine_attrs   GetInputAttrs()     override;
     virtual const ac_engine_attrs   GetOutputAttrs()    override;
 
+    virtual int GetOutputIndex(const std::string name) override;
+
 private:
     void destory();
 
@@ -124,6 +126,8 @@ private:
 
     std::vector<ac_engine_attr> input_attrs_;
     std::vector<ac_engine_attr> output_attrs_;
+
+    std::unordered_map<std::string, uint32_t> name_index_map_;
 };
 
 inline std::string data_type_string(ac_tensor_type_e dt){
@@ -241,6 +245,10 @@ error_e ONNXEngine::create(const std::string &file) {
         outputNodeNames_.emplace_back(strdup(outputName.get()));
         output_attrs_.emplace_back(engine_tensor_attr_encode(i, strdup(outputName.get()), typeInfo));
     }
+
+    for (size_t i = 0; i < output_num_; i++) {
+        name_index_map_[output_attrs_[i].name] = i;
+    }
     
     return SUCCESS;
 }
@@ -333,6 +341,15 @@ const ac_engine_attrs ONNXEngine::GetInputAttrs() {
 
 const ac_engine_attrs ONNXEngine::GetOutputAttrs() {
     return output_attrs_;
+}
+
+int ONNXEngine::GetOutputIndex(const std::string name) {
+    auto it = name_index_map_.find(name);
+    if (it != name_index_map_.end()) {
+        return it->second;
+    } else {
+        return -1;
+    }
 }
 
 std::shared_ptr<ACEngine> create_engine(const std::string &file_path, bool use_plugins) {
