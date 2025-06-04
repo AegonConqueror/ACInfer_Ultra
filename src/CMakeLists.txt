@@ -59,13 +59,22 @@ if(USE_TENSORRT)
 endif()
 
 add_executable(
-    yolov8_demo
-    ${CMAKE_CURRENT_SOURCE_DIR}/demo/yolov8_demo.cpp
+    yolov8_test_onnx
+    ${CMAKE_CURRENT_SOURCE_DIR}/demo/yolov8_test_onnx.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolov8.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/preprocess.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/yolov8_postprocess.cpp
 )
-target_link_libraries(yolov8_demo PRIVATE inference_engine)
+target_link_libraries(yolov8_test_onnx PRIVATE inference_engine)
+
+add_executable(
+    yolov8_test_trt
+    ${CMAKE_CURRENT_SOURCE_DIR}/demo/yolov8_test_trt.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolov8.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/preprocess.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/yolov8_postprocess.cpp
+)
+target_link_libraries(yolov8_test_trt PRIVATE inference_engine)
 
 add_executable(
     kxwell_pose_demo
