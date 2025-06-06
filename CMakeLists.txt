@@ -25,8 +25,8 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib/")
 # 静态库
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib/")
 
-option(USE_TENSORRT     "option for open tensorrt inference api"    ON)
-option(USE_ONNXRUNTIME  "option for open onnxruntime inference api" ON)
+option(USE_TENSORRT     "option for open tensorrt inference api"    OFF)
+option(USE_ONNXRUNTIME  "option for open onnxruntime inference api" OFF)
 option(USE_ATALS        "option for open atals inference api"       OFF)
 
 if(USE_TENSORRT)

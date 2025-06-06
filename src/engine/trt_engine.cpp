@@ -389,13 +389,13 @@ void TRTEngine::GetInferOutput(InferenceData& outputData, bool sync) {
         auto output_type = output->type();
         auto elem_size = iTools::vectorProduct(output->dims());
         if (output_type == TRT::DataType::Float) {
-            outputData.push_back({dataPtr, elem_size * sizeof(float)});
+            outputData.push_back({dataPtr, elem_size});
         } else if (output_type == TRT::DataType::Float16) {
-            outputData.push_back({dataPtr, elem_size * sizeof(uint16_t)});
+            outputData.push_back({dataPtr, elem_size});
         } else if (output_type == TRT::DataType::UInt8) {
-            outputData.push_back({dataPtr, elem_size * sizeof(uint8_t)});
+            outputData.push_back({dataPtr, elem_size});
         } else if (output_type == TRT::DataType::Int32) {
-            outputData.push_back({dataPtr, elem_size * sizeof(int32_t)});
+            outputData.push_back({dataPtr, elem_size});
         }
     }
 }

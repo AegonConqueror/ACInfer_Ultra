@@ -5,6 +5,13 @@
 #include "process/preprocess.h"
 #include "process/yolov8_postprocess.h"
 
+void yolov8_pose_decode_gpu(
+    float** d_preds, int* d_size, std::vector<float> &pose_rects,
+    std::vector<std::map<int, KeyPoint>> &key_points,
+    int input_w, int input_h, int class_num,
+    float conf_thres, float nms_thres, int keypoint_num
+);
+
 namespace YOLOv8 {
 
     void letterbox_decode(std::vector<yolov8_result> &objects, bool hor, int pad, TaskType task_type) {
@@ -125,11 +132,29 @@ namespace YOLOv8 {
                 output_data[i] = (void *)infer_output_data[engine_->GetOutputIndex(pose_names[i])].first;
             }
 
+            
+
+#if USE_TENSORRT == 1
+            LOG_INFO("using gpu kernel decode pose");
+
+            int output_size[output_num];
+            for (size_t i = 0; i < output_num; i++) {
+                output_size[i] = infer_output_data[engine_->GetOutputIndex(pose_names[i])].second;
+            }
+
+
+            yolov8_pose_decode_gpu(
+                (float **)output_data, output_size, detectiont_rects, 
+                pose_keypoints, input_w, input_h, model_class_num_,
+                0.45, 0.45, 17
+            );
+#else
+            LOG_INFO("using cpu decode pose");
             yolov8::PostprocessSplit_POSE(
                 (float **)output_data, detectiont_rects,
                 pose_keypoints, input_w, input_h, model_class_num_
             );
-
+#endif
             for (auto &kp : pose_keypoints) {
                 for (auto &kp_item : kp) {
                     kp_item.second.x = kp_item.second.x * float(image_w);
