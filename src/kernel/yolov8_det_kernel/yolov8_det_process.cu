@@ -4,16 +4,10 @@
 
 #include "yolo/yolov8_type.h"
 
-struct KeyPointGPU {
-    float x, y;
-    float score;
-};
-
-struct PoseRectGPU {
+struct DetectRectGPU {
     float xmin, ymin, xmax, ymax;
     int classId;
     float score;
-    KeyPointGPU keypoints[17];
 };
 
 __device__ 
@@ -22,7 +16,7 @@ float sigmoid_gpu(float x) {
 }
 
 __device__
-float iou_gpu(const PoseRectGPU &a, const PoseRectGPU &b) {
+float iou_gpu(const DetectRectGPU &a, const DetectRectGPU &b) {
     float xmin = fmaxf(a.xmin, b.xmin);
     float ymin = fmaxf(a.ymin, b.ymin);
     float xmax = fminf(a.xmax, b.xmax);
@@ -36,7 +30,7 @@ float iou_gpu(const PoseRectGPU &a, const PoseRectGPU &b) {
 }
 
 __global__
-void nms_kernel(const PoseRectGPU* dets, int* keep, int num, float iou_thresh) {
+void nms_kernel(const DetectRectGPU* dets, int* keep, int num, float iou_thresh) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= num || keep[i] == 0) return;
     for (int j = 0; j < num; j++) {
@@ -69,10 +63,10 @@ void generate_meshgrid_kernel(float* meshgrid, const int* mapSize, int headNum){
 }
 
 __global__
-void yolov8_pose_decode_kernel(
-    float** preds, float* meshgrid, PoseRectGPU* outputRects, int* obj_count, 
+void yolov8_det_decode_kernel(
+    float** preds, float* meshgrid, DetectRectGPU* outputRects, int* obj_count, 
     int* map_size, int* strides, int* head_start, int total_anchors, int headNum, 
-    int input_w, int input_h, int classNum, float confThresh, int kepPointNum
+    int input_w, int input_h, int classNum, float confThresh
 ){
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= total_anchors) return;
@@ -98,7 +92,6 @@ void yolov8_pose_decode_kernel(
     
     float* reg = preds[head_idx * 2 + 0];
     float* cls = preds[head_idx * 2 + 1];
-    float* ps  = preds[head_idx + headNum * 2];
 
     float cx = meshgrid[tid * 2];
     float cy = meshgrid[tid * 2 + 1];
@@ -132,26 +125,19 @@ void yolov8_pose_decode_kernel(
 
     int id = atomicAdd(obj_count, 1);
 
-    PoseRectGPU& temp = outputRects[id];
+    DetectRectGPU& temp = outputRects[id];
     temp.xmin = xmin / input_w;
     temp.ymin = ymin / input_h;
     temp.xmax = xmax / input_w;
     temp.ymax = ymax / input_h;
     temp.classId = cls_index;
     temp.score = cls_max;
-
-    for (int kc = 0; kc < kepPointNum; kc++) {
-        temp.keypoints[kc].x = (ps[(kc * 3 + 0) * h * w + row * w + col] * 2 + (cx - 0.5f)) * stride / input_w;
-        temp.keypoints[kc].y = (ps[(kc * 3 + 1) * h * w + row * w + col] * 2 + (cy - 0.5f)) * stride / input_h;
-        temp.keypoints[kc].score = sigmoid_gpu(ps[(kc * 3 + 2) * h * w + row * w + col]);
-    }
 }
 
-void yolov8_pose_decode_gpu(
+void yolov8_det_decode_gpu(
     float** preds, int* d_size, std::vector<float> &pose_rects,
-    std::vector<std::map<int, KeyPoint>> &key_points,
     int input_w, int input_h, int class_num,
-    float conf_thres, float nms_thres, int keypoint_num
+    float conf_thres, float nms_thres
 ) {
     int headNum = 3;
     int mapSize[headNum * 2] = {80, 80, 40, 40, 20, 20};
@@ -187,9 +173,9 @@ void yolov8_pose_decode_gpu(
     std::vector<float> h_meshgrid(total_anchors * 2);
     checkCudaRuntime(cudaMemcpy(h_meshgrid.data(), d_meshgrid, sizeof(float) * total_anchors * 2, cudaMemcpyDeviceToHost));
     
-    PoseRectGPU* d_output_objects;
+    DetectRectGPU* d_output_objects;
     int* d_objectCount;
-    checkCudaRuntime(cudaMalloc(&d_output_objects, sizeof(PoseRectGPU) * total_anchors));
+    checkCudaRuntime(cudaMalloc(&d_output_objects, sizeof(DetectRectGPU) * total_anchors));
     checkCudaRuntime(cudaMalloc(&d_objectCount, sizeof(int)));
     checkCudaRuntime(cudaMemset(d_objectCount, 0, sizeof(int)));
 
@@ -211,9 +197,9 @@ void yolov8_pose_decode_gpu(
     checkCudaRuntime(cudaMemcpy(pBlob_d, pBlob_d_host, blob_num * sizeof(float*), cudaMemcpyHostToDevice));
 
     checkCudaKernel(
-        yolov8_pose_decode_kernel<<<blocks, threads>>>(
-            pBlob_d, d_meshgrid, d_output_objects, d_objectCount, d_mapSize, d_strides, d_head_start,
-            total_anchors, headNum, input_w, input_h, class_num, conf_thres, keypoint_num
+        yolov8_det_decode_kernel<<<blocks, threads>>>(
+            pBlob_d, d_meshgrid, d_output_objects, d_objectCount, d_mapSize, d_strides, 
+            d_head_start, total_anchors, headNum, input_w, input_h, class_num, conf_thres
         );
     );
 
@@ -228,9 +214,9 @@ void yolov8_pose_decode_gpu(
         nms_kernel<<<blocks, threads>>>(d_output_objects, d_keep, object_num, nms_thres);
     );
 
-    std::vector<PoseRectGPU> h_objects(object_num);
+    std::vector<DetectRectGPU> h_objects(object_num);
     std::vector<int> h_keep(object_num);
-    checkCudaRuntime(cudaMemcpy(h_objects.data(), d_output_objects, sizeof(PoseRectGPU) * object_num, cudaMemcpyDeviceToHost));
+    checkCudaRuntime(cudaMemcpy(h_objects.data(), d_output_objects, sizeof(DetectRectGPU) * object_num, cudaMemcpyDeviceToHost));
     checkCudaRuntime(cudaMemcpy(h_keep.data(), d_keep, sizeof(int) * object_num, cudaMemcpyDeviceToHost));
 
     for (int i = 0; i < object_num; i++) {
@@ -242,17 +228,6 @@ void yolov8_pose_decode_gpu(
         pose_rects.push_back(obj.ymin);
         pose_rects.push_back(obj.xmax);
         pose_rects.push_back(obj.ymax);
-
-        std::map<int, KeyPoint> kp_map;
-        for (int k = 0; k < keypoint_num; k++) {
-            KeyPoint kp;
-            kp.x = obj.keypoints[k].x;
-            kp.y = obj.keypoints[k].y;
-            kp.score = obj.keypoints[k].score;
-            kp.id = k;
-            kp_map[k] = kp;
-        }
-        key_points.push_back(kp_map);
     }
 
 
