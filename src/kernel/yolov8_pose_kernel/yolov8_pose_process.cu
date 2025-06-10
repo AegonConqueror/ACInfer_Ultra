@@ -228,10 +228,10 @@ void yolov8_pose_decode_gpu(
         nms_kernel<<<blocks, threads>>>(d_output_objects, d_keep, object_num, nms_thres);
     );
 
-    std::vector<PoseRectGPU> h_objects(object_num);
-    std::vector<int> h_keep(object_num);
-    checkCudaRuntime(cudaMemcpy(h_objects.data(), d_output_objects, sizeof(PoseRectGPU) * object_num, cudaMemcpyDeviceToHost));
-    checkCudaRuntime(cudaMemcpy(h_keep.data(), d_keep, sizeof(int) * object_num, cudaMemcpyDeviceToHost));
+        std::vector<PoseRectGPU> h_objects(object_num);
+        std::vector<int> h_keep(object_num);
+        checkCudaRuntime(cudaMemcpy(h_objects.data(), d_output_objects, sizeof(PoseRectGPU) * object_num, cudaMemcpyDeviceToHost));
+        checkCudaRuntime(cudaMemcpy(h_keep.data(), d_keep, sizeof(int) * object_num, cudaMemcpyDeviceToHost));
 
     for (int i = 0; i < object_num; i++) {
         if (h_keep[i] == 0) continue;

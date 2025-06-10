@@ -135,18 +135,19 @@ public:
 
     error_e create(const std::string &file);
 
-    virtual void        Print() override;
-    virtual void        BindingInput(InferenceData& inputData) override;
-    virtual void        GetInferOutput(InferenceData& outputData, bool sync) override;
+    virtual void Print() override;
+    virtual void BindingInput(InferenceData& inputData) override;
+    virtual void GetInferOutput(InferenceData& outputData, bool sync) override;
 
-    virtual const ac_engine_attrs   GetInputAttrs()     override;
-    virtual const ac_engine_attrs   GetOutputAttrs()    override;
+    virtual const ac_engine_attrs GetInputAttrs()  override;
+    virtual const ac_engine_attrs GetOutputAttrs() override;
 
     virtual int GetOutputIndex(const std::string name) override;
 
 private:
     void destory();
     void synchronize();
+
     int get_max_batch_size();
 
 private:
@@ -154,10 +155,10 @@ private:
 
     std::vector<std::shared_ptr<TRT::Tensor>> inputs_;
     std::vector<std::shared_ptr<TRT::Tensor>> outputs_;
-
     std::vector<std::shared_ptr<TRT::Tensor>> orderdBlobs_;
 
     std::shared_ptr<EngineContext> context_;
+    
     std::vector<void *> bindingsPtr_;
 
     uint32_t input_num_;
