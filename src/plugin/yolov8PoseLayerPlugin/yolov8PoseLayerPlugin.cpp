@@ -20,6 +20,15 @@ namespace {
     }
 }
 
+cudaError_t yolov8PoseLayerInfernece(
+    float* input, int* num_dets, int* det_classes, float* det_scores, float* det_boxes, float* det_keypoints,
+    const uint& batchSize, uint64_t& inputSize, const uint& maxStride, 
+    const uint& numClasses, const uint& keyPoints, const uint& totalAnchors, 
+    const int* mapSize, const int* headStarts,
+    const float& scoreThreshold, const float& nmsThreshold,
+    cudaStream_t stream
+);
+
 nvinfer1::PluginFieldCollection YOLOv8PoseLayerPluginCreator::mFC{};
 std::vector<nvinfer1::PluginField> YOLOv8PoseLayerPluginCreator::mPluginAttributes;
 
@@ -211,19 +220,18 @@ int32_t YOLOv8PoseLayer::enqueue(
 ) noexcept {
     const int batchSize = inputDesc[0].dims.d[0];
 
-    void* num_detections      = outputs[0];
-    void* detection_classes   = outputs[1];
-    void* detection_scores    = outputs[2];
-    void* detection_boxes     = outputs[3];
-    void* detection_keypoints = outputs[4];
+    int* num_detections        = (int *)outputs[0];
+    int* detection_classes     = (int *)outputs[1];
+    float* detection_scores    = (float *)outputs[2];
+    float* detection_boxes     = (float *)outputs[3];
+    float* detection_keypoints = (float *)outputs[4];
 
-    checkCudaRuntime(cudaMemsetAsync((int *)num_detections, 0, sizeof(int) * batchSize, stream));
-    checkCudaRuntime(cudaMemsetAsync((int *)detection_classes, 0, sizeof(int) * batchSize * m_totalAnchors, stream));
-    checkCudaRuntime(cudaMemsetAsync((float *)detection_scores, 0, sizeof(float) * batchSize * m_totalAnchors, stream));
-    checkCudaRuntime(cudaMemsetAsync((float *)detection_boxes, 0, sizeof(float) * batchSize * m_totalAnchors * 4, stream));
-    checkCudaRuntime(cudaMemsetAsync((float *)detection_keypoints, 0, sizeof(float) * batchSize * m_totalAnchors * 3, stream));
-    
-    // TODO: do kernerl
+    checkCudaRuntime(cudaMemsetAsync(num_detections, 0, sizeof(int) * batchSize, stream));
+    checkCudaRuntime(cudaMemsetAsync(detection_classes, 0, sizeof(int) * batchSize * m_totalAnchors, stream));
+    checkCudaRuntime(cudaMemsetAsync(detection_scores, 0, sizeof(float) * batchSize * m_totalAnchors, stream));
+    checkCudaRuntime(cudaMemsetAsync(detection_boxes, 0, sizeof(float) * batchSize * m_totalAnchors * 4, stream));
+    checkCudaRuntime(cudaMemsetAsync(detection_keypoints, 0, sizeof(float) * batchSize * m_totalAnchors * 3, stream));
+
     int* d_mapSize;
     int* d_headStarts;
     checkCudaRuntime(cudaMalloc(&d_mapSize, m_mapSize.size() * sizeof(int)));
@@ -233,16 +241,22 @@ int32_t YOLOv8PoseLayer::enqueue(
 
 
     uint64_t inputSize = m_totalAnchors * (4 + m_numClasses + 2 + m_keyPoints * 3);
-    
-    // for (uint i = 0; i < NBINPUTS; ++i) {
-    //     inputDesc[i].dims.nbDims
-    // }
-    
+
+    checkCudaRuntime(
+        yolov8PoseLayerInfernece(
+            (float*)inputs, num_detections, detection_classes, detection_scores, detection_boxes, detection_keypoints,
+            batchSize, inputSize, m_maxStride, m_numClasses, m_keyPoints, m_totalAnchors, d_mapSize, d_headStarts, 
+            m_socreThreshold, m_nmsThreshold, stream
+        )
+    );
+
+    checkCudaRuntime(cudaFree(d_headStarts));
+    checkCudaRuntime(cudaFree(d_mapSize));
 
     return 0;
 }
 
-YOLOv8PoseLayerPluginCreator::YOLOv8PoseLayerPluginCreator() {
+YOLOv8PoseLayerPluginCreator::YOLOv8PoseLayerPluginCreator() noexcept {
     mPluginAttributes.emplace_back(nvinfer1::PluginField("max_stride", nullptr, nvinfer1::PluginFieldType::kINT32, NHEADNUM));
     mPluginAttributes.emplace_back(nvinfer1::PluginField("socre_threshold", nullptr, nvinfer1::PluginFieldType::kFLOAT32, 1));
     mPluginAttributes.emplace_back(nvinfer1::PluginField("nms_threshold", nullptr, nvinfer1::PluginFieldType::kFLOAT32, 1));
@@ -300,5 +314,5 @@ nvinfer1::IPluginV2DynamicExt* YOLOv8PoseLayerPluginCreator::deserializePlugin(
     return plugin;
 }
 // 注册插件。 在实现了各个类方法后，需要调用宏对plugin进行注册。以方便TensorRT识别并找到对应的Plugin。
-REGISTER_TENSORRT_PLUGIN(YOLOv8PoseLayer);
+REGISTER_TENSORRT_PLUGIN(YOLOv8PoseLayerPluginCreator);
 

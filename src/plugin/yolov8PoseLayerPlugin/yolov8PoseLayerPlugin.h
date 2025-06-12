@@ -83,9 +83,9 @@ public:
     ) noexcept override;
 
     // ============================= 需要实现的虚函数函数 =============================
-    void setPluginNamespace(nvinfer1::AsciiChar const *plugin_namespace) noexcept override;
+    void setPluginNamespace(nvinfer1::AsciiChar const *plugin_namespace) noexcept override { m_Namespace = plugin_namespace; }
 
-    nvinfer1::AsciiChar const* getPluginNamespace() const noexcept override;
+    nvinfer1::AsciiChar const* getPluginNamespace() const noexcept override { return m_Namespace.c_str(); }
 
 private:
     std::string m_Namespace{""};

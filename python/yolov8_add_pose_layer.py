@@ -7,6 +7,7 @@ from functools import reduce
 head_num = 3
 map_size = [80, 40, 20]
 max_stride = 32
+max_objects = 20
 
 def generate_meshgrid():
     meshgrid = []
@@ -22,6 +23,7 @@ def generate_meshgrid():
 meshgrid = gs.Constant(name="mesh_grid", values=generate_meshgrid())
 
 pose_layer_attrs = {
+    "max_objects": max_objects,
     "max_stride": max_stride,
     "socre_threshold": 0.45,
     "nms_threshold": 0.45,

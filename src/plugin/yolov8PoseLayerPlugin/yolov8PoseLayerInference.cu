@@ -19,11 +19,6 @@ float sigmoid_gpu(float x) {
     return 1.0f / (1.0f + expf(-x));
 }
 
-__device__ 
-float sigmoid_gpu(float x) {
-    return 1.0f / (1.0f + expf(-x));
-}
-
 __device__
 float iou_gpu(const PoseRectGPU &a, const PoseRectGPU &b) {
     float xmin = fmaxf(a.xmin, b.xmin);
@@ -57,7 +52,7 @@ void yolov8_pose_decode_kernel(
     const uint& maxStride, const uint& numClasses, const uint& keyPoints, const uint& totalAnchors,
     const uint& input_w, const uint& input_h,
     const float& scoreThreshold,
-    const uint* mapSize, const uint* headStarts
+    const int* mapSize, const int* headStarts
 ) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= totalAnchors) return;
@@ -142,18 +137,14 @@ void yolov8_pose_decode_kernel(
 
 cudaError_t yolov8PoseLayerInfernece(
     float* input, int* num_dets, int* det_classes, float* det_scores, float* det_boxes, float* det_keypoints,
-    const uint& batchSize, uint64_t& inputSize, uint64_t& outputSize, const uint& maxStride, 
+    const uint& batchSize, uint64_t& inputSize, const uint& maxStride, 
     const uint& numClasses, const uint& keyPoints, const uint& totalAnchors, 
-    const uint* mapSize, const uint* headStarts,
+    const int* mapSize, const int* headStarts,
     const float& scoreThreshold, const float& nmsThreshold,
     cudaStream_t stream
 ) {
-    int reg1_input_size = 4 * mapSize[0] * mapSize[0];
-    int cls1_input_size = numClasses * mapSize[0] * mapSize[0];
-    int ps1_input_size = 3 * keyPoints * mapSize[0] * mapSize[0];
-
     int threads = 256;
-    int blocks = (outputSize + threads - 1) / threads;
+    int blocks = (totalAnchors + threads - 1) / threads;
 
     uint input_w = mapSize[2] * maxStride;
     uint input_h = mapSize[2] * maxStride;
@@ -194,25 +185,29 @@ cudaError_t yolov8PoseLayerInfernece(
             auto& obj = h_objects[i];
 
             // DetectionClasses [batch_size, numboxes]
-            det_classes[batch * outputSize + i] = obj.classId;
+            det_classes[batch * totalAnchors + i] = obj.classId;
 
             // DetectionScores [batch_size, numboxes]
-            det_scores[batch * outputSize + i] = obj.score;
+            det_scores[batch * totalAnchors + i] = obj.score;
 
             // DetectionBoxes [batch_size, numboxes, 4]
-            det_boxes[batch * outputSize * 4 + i * 4 + 0] = obj.xmin;
-            det_boxes[batch * outputSize * 4 + i * 4 + 1] = obj.ymin;
-            det_boxes[batch * outputSize * 4 + i * 4 + 2] = obj.xmax;
-            det_boxes[batch * outputSize * 4 + i * 4 + 3] = obj.ymax;
+            det_boxes[batch * totalAnchors * 4 + i * 4 + 0] = obj.xmin;
+            det_boxes[batch * totalAnchors * 4 + i * 4 + 1] = obj.ymin;
+            det_boxes[batch * totalAnchors * 4 + i * 4 + 2] = obj.xmax;
+            det_boxes[batch * totalAnchors * 4 + i * 4 + 3] = obj.ymax;
 
             // DetectionKeyPoints [batch_size, numboxes, 3]
             for (int k = 0; k < keyPoints; k++) {
-                det_keypoints[batch * outputSize * 3 + k * 3 + i + 0] = obj.keypoints[k].x;
-                det_keypoints[batch * outputSize * 3 + k * 3 + i + 1] = obj.keypoints[k].y;
-                det_keypoints[batch * outputSize * 3 + k * 3 + i + 2] = obj.keypoints[k].score;
+                det_keypoints[batch * totalAnchors * 3 + k * 3 + i + 0] = obj.keypoints[k].x;
+                det_keypoints[batch * totalAnchors * 3 + k * 3 + i + 1] = obj.keypoints[k].y;
+                det_keypoints[batch * totalAnchors * 3 + k * 3 + i + 2] = obj.keypoints[k].score;
             }
         }
+        checkCudaRuntime(cudaFree(d_keep));
     }
+
+    checkCudaRuntime(cudaFree(d_objectCount));
+    checkCudaRuntime(cudaFree(d_output_objects));
     
     return cudaGetLastError();
 }

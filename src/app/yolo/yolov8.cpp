@@ -6,9 +6,9 @@
 #include "process/yolov8_postprocess.h"
 
 void yolov8_pose_decode_gpu(
-    float** d_preds, int* d_size, std::vector<float> &pose_rects,
-    std::vector<std::map<int, KeyPoint>> &key_points,
-    int input_w, int input_h, int class_num,
+    float** preds, int* d_size, 
+    int* num_dets, int* det_classes, float* det_scores, float* det_boxes, float* det_keypoints,
+    int input_w, int input_h, int image_w, int image_h, int class_num,
     float conf_thres, float nms_thres, int keypoint_num
 );
 
@@ -96,6 +96,8 @@ namespace YOLOv8 {
         int image_w     = frame.cols;
         int image_h     = frame.rows;
 
+        int keypoint_num = 17;
+
         InferenceData infer_output_data;
         engine_->GetInferOutput(infer_output_data);
 
@@ -105,103 +107,61 @@ namespace YOLOv8 {
 
         std::vector<float> detectiont_rects;
         std::vector<std::map<int, KeyPoint>> pose_keypoints;
-        std::vector<cv::Mat> seg_masks;
-        cv::Mat seg_mask = cv::Mat::zeros(frame.rows, frame.cols, CV_8UC3);
 
-        if (task_type_ == TaskType::YOLOv8_DET) {
-            std::vector<std::string> det_names = {"reg1", "cls1", "reg2", "cls2", "reg3", "cls3"};
+        std::vector<std::string> pose_names = {"reg1", "cls1", "reg2", "cls2", "reg3", "cls3", "ps1", "ps2", "ps3"};
             
-            if (det_names.size() != output_num) return LOAD_MODEL_FAIL;
+        if (pose_names.size() != output_num) return LOAD_MODEL_FAIL;
 
-            for (size_t i = 0; i < output_num; i++) {
-                output_data[i] = (void *)infer_output_data[engine_->GetOutputIndex(det_names[i])].first;
-            }
-
-            yolov8::PostprocessSplit_DET(
-                (float **)output_data, detectiont_rects,
-                input_w, input_h, model_class_num_
-            );
+        for (size_t i = 0; i < output_num; i++) {
+            output_data[i] = (void *)infer_output_data[engine_->GetOutputIndex(pose_names[i])].first;
         }
+
+        LOG_INFO("using gpu kernel decode pose");
+        int output_size[output_num];
+        for (size_t i = 0; i < output_num; i++) {
+            output_size[i] = infer_output_data[engine_->GetOutputIndex(pose_names[i])].second;
+        }
+
+        int keepTopK = 20;
         
-        if (task_type_ == TaskType::YOLOv8_POSE) {
-            std::vector<std::string> pose_names = {"reg1", "cls1", "reg2", "cls2", "reg3", "cls3", "ps1", "ps2", "ps3"};
-            
-            if (pose_names.size() != output_num) return LOAD_MODEL_FAIL;
+        int num_dets[1];
+        int det_classes[1 * keepTopK]; 
+        float det_scores[1 * keepTopK]; 
+        float det_boxes[1 * keepTopK * 4];
+        float det_keypoints[1 * keepTopK * 3 * keypoint_num];
 
-            for (size_t i = 0; i < output_num; i++) {
-                output_data[i] = (void *)infer_output_data[engine_->GetOutputIndex(pose_names[i])].first;
-            }
+        yolov8_pose_decode_gpu(
+            (float **)output_data, output_size, 
+            num_dets, det_classes, det_scores, det_boxes, det_keypoints,
+            input_w, input_h, image_w, image_h, model_class_num_,
+            0.45, 0.45, keypoint_num
+        );
 
-            
-
-#if USE_TENSORRT == 1
-            LOG_INFO("using gpu kernel decode pose");
-
-            int output_size[output_num];
-            for (size_t i = 0; i < output_num; i++) {
-                output_size[i] = infer_output_data[engine_->GetOutputIndex(pose_names[i])].second;
-            }
-
-
-            yolov8_pose_decode_gpu(
-                (float **)output_data, output_size, detectiont_rects, 
-                pose_keypoints, input_w, input_h, model_class_num_,
-                0.45, 0.45, 17
-            );
-#else
-            LOG_INFO("using cpu decode pose");
-            yolov8::PostprocessSplit_POSE(
-                (float **)output_data, detectiont_rects,
-                pose_keypoints, input_w, input_h, model_class_num_
-            );
-#endif
-            for (auto &kp : pose_keypoints) {
-                for (auto &kp_item : kp) {
-                    kp_item.second.x = kp_item.second.x * float(image_w);
-                    kp_item.second.y = kp_item.second.y * float(image_h);
-                }
-            }
-        } 
-
-        if (task_type_ == TaskType::YOLOv8_SEG) {
-            std::vector<std::string> seg_names = {"reg1", "cls1", "reg2", "cls2", "reg3", "cls3", "mc1", "mc2", "mc3", "seg"};
-            
-            if (seg_names.size() != output_num) return LOAD_MODEL_FAIL;
-
-            for (size_t i = 0; i < output_num; i++) {
-                output_data[i] = (void *)infer_output_data[engine_->GetOutputIndex(seg_names[i])].first;
-            }
-
-            yolov8::PostprocessSplit_SEG(
-                (float **)output_data, detectiont_rects,
-                seg_masks, input_w, input_h, model_class_num_
-            );
-        }
-
-        for (int i = 0; i < detectiont_rects.size(); i += 6) {
-            int classId = int(detectiont_rects[i + 0]);
-            float conf = detectiont_rects[i + 1];
-            int xmin = int(detectiont_rects[i + 2] * float(image_w) + 0.5);
-            int ymin = int(detectiont_rects[i + 3] * float(image_h) + 0.5);
-            int xmax = int(detectiont_rects[i + 4] * float(image_w) + 0.5);
-            int ymax = int(detectiont_rects[i + 5] * float(image_h) + 0.5);
-
+        for (int i = 0; i < num_dets[0]; i++) {
             yolov8_result dr;
-            dr.box = cv::Rect(xmin, ymin, xmax - xmin, ymax - ymin);
+
+            int classId = det_classes[i];
+            float conf = det_scores[i];
+            
+            int xmin = int(det_boxes[i * 4 + 0]);
+            int ymin = int(det_boxes[i * 4 + 1]);
+            int xmax = int(det_boxes[i * 4 + 2]);
+            int ymax = int(det_boxes[i * 4 + 3]);
+
+            std::map<int, KeyPoint> kp_map;
+            for (int k = 0; k < keypoint_num; k++) {
+                KeyPoint kp;
+                kp.x = det_keypoints[k * keypoint_num * 3 + i * 3 + 0];
+                kp.y = det_keypoints[k * keypoint_num * 3 + i * 3 + 1];
+                kp.score = det_keypoints[k * keypoint_num * 3 + i * 3 + 2];
+                kp.id = k;
+                kp_map[k] = kp;
+            }
+
             dr.class_id = classId;
             dr.confidence = conf;
-            if (task_type_ == TaskType::YOLOv8_POSE) {
-                dr.keypoints = pose_keypoints[static_cast<int>(i / 6)];
-            }
-            
-            if (task_type_ == TaskType::YOLOv8_SEG) {
-                cv::Mat seg_cv = seg_masks[static_cast<int>(i / 6)];
-                cv::Mat seg_cv_resize;
-                cv::resize(seg_cv, seg_cv_resize, frame.size());
-                cv::Mat roi;
-                cv::inRange(seg_cv_resize(dr.box), cv::Scalar(0.5), cv::Scalar(1), roi);
-                dr.mask = roi;
-            }
+            dr.box = cv::Rect(xmin, ymin, xmax - xmin, ymax - ymin);
+            dr.keypoints = kp_map;
 
             objects.push_back(dr);
         }

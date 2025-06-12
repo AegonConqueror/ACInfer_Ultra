@@ -37,7 +37,7 @@ if(USE_TENSORRT)
         ${CMAKE_CURRENT_SOURCE_DIR}/engine/builder/trt_builder.cpp
     )
     target_link_libraries(build_trt_engine PRIVATE tensorrt_utils)
-    target_link_libraries(build_trt_engine PRIVATE -Wl,--no-as-needed customLayerPlugin)
+    target_link_libraries(build_trt_engine PRIVATE -Wl,--no-as-needed customLayerPlugin yolov8PoseLayerPlugin)
     set_target_properties(build_trt_engine PROPERTIES CUDA_ARCHITECTURES "61;70;75")
 
 endif(USE_TENSORRT)
@@ -56,24 +56,6 @@ endif()
 
 if(USE_TENSORRT)
     target_link_libraries(inference_engine PUBLIC tensorrt_utils)
-endif()
-
-if(USE_ONNXRUNTIME)
-    add_executable(
-        yolov8_test_onnx
-        ${CMAKE_CURRENT_SOURCE_DIR}/demo/yolov8_test_onnx.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolov8.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/preprocess.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/yolov8_postprocess.cpp
-    )
-    target_link_libraries(yolov8_test_onnx PRIVATE inference_engine)
-
-    add_executable(
-        kxwell_pose_demo
-        ${CMAKE_CURRENT_SOURCE_DIR}/demo/kxwell_pose_demo.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolov8pose.cpp
-    )
-    target_link_libraries(kxwell_pose_demo PRIVATE inference_engine)
 endif()
 
 if(USE_TENSORRT)
@@ -98,6 +80,24 @@ if(USE_TENSORRT)
     target_link_libraries(plugin_demo PRIVATE -Wl,--no-as-needed customLayerPlugin)
     set_target_properties(plugin_demo PROPERTIES CUDA_ARCHITECTURES "61;70;75")
 endif(USE_TENSORRT)
+
+# if(USE_ONNXRUNTIME)
+#     add_executable(
+#         yolov8_test_onnx
+#         ${CMAKE_CURRENT_SOURCE_DIR}/demo/yolov8_test_onnx.cpp
+#         ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolov8.cpp
+#         ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/preprocess.cpp
+#         ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/yolov8_postprocess.cpp
+#     )
+#     target_link_libraries(yolov8_test_onnx PRIVATE inference_engine)
+
+#     add_executable(
+#         kxwell_pose_demo
+#         ${CMAKE_CURRENT_SOURCE_DIR}/demo/kxwell_pose_demo.cpp
+#         ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolov8pose.cpp
+#     )
+#     target_link_libraries(kxwell_pose_demo PRIVATE inference_engine)
+# endif()
 
 # find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 

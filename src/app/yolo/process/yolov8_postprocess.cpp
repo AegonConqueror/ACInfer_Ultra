@@ -83,23 +83,9 @@ namespace yolov8 {
         return float(Inter) / float(Total);
     }
 
-    std::vector<float> GenerateMeshgrid(){
-        std::vector<float> meshgrid;
-
-        for (int index = 0; index < headNum; index++) {
-            for (int i = 0; i < mapSize[index][0]; i++) {
-                for (int j = 0; j < mapSize[index][1]; j++) {
-                    meshgrid.push_back(float(j + 0.5));
-                    meshgrid.push_back(float(i + 0.5));
-                }
-            }
-        }
-        return meshgrid;
-    }
-
     void process_det(
         float* cls, float* reg, std::vector<Yolov8Rect> &results,
-        std::vector<float> meshgrid, int input_w, int input_h, 
+        int input_w, int input_h, 
         float &cls_max, int &cls_index, int &grid_index, 
         int head_index, int class_num, float conf_thres
     ) {
@@ -107,8 +93,13 @@ namespace yolov8 {
         int grid_w = mapSize[head_index][0];
         int grid_h = mapSize[head_index][1];
 
+        float mesh_0 = .0f;
+        float mesh_1 = .0f;
         for (int h = 0; h < grid_w; h++) {
             for (int w = 0; w < grid_h; w++) {
+                mesh_0 = float(w + 0.5);
+                mesh_1 = float(h + 0.5);
+
                 grid_index += 2;
 
                 for (int cl = 0; cl < class_num; cl++) {
@@ -129,10 +120,10 @@ namespace yolov8 {
                 if (cls_max > conf_thres) {
                     Yolov8Rect temp;
 
-                    float xmin = (meshgrid[grid_index + 0] - reg[0 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
-                    float ymin = (meshgrid[grid_index + 1] - reg[1 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
-                    float xmax = (meshgrid[grid_index + 0] + reg[2 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
-                    float ymax = (meshgrid[grid_index + 1] + reg[3 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float xmin = (mesh_0 - reg[0 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float ymin = (mesh_1 - reg[1 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float xmax = (mesh_0 + reg[2 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float ymax = (mesh_1 + reg[3 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
 
                     xmin = xmin > 0 ? xmin : 0;
                     ymin = ymin > 0 ? ymin : 0;
@@ -155,16 +146,21 @@ namespace yolov8 {
 
     void process_pose(
         float* cls, float* reg, float* pose, std::vector<Yolov8Rect> &results,
-        std::vector<float> meshgrid, int input_w, int input_h, 
+        int input_w, int input_h, 
         float &cls_max, int &cls_index, int &grid_index, 
         int head_index, int class_num, float conf_thres
     ) {
 
         int grid_w = mapSize[head_index][0];
         int grid_h = mapSize[head_index][1];
-
+        
+        float mesh_0 = .0f;
+        float mesh_1 = .0f;
         for (int h = 0; h < grid_w; h++) {
             for (int w = 0; w < grid_h; w++) {
+                mesh_0 = float(w + 0.5);
+                mesh_1 = float(h + 0.5);
+
                 grid_index += 2;
 
                 for (int cl = 0; cl < class_num; cl++) {
@@ -185,10 +181,10 @@ namespace yolov8 {
                 if (cls_max > conf_thres) {
                     Yolov8Rect temp;
 
-                    float xmin = (meshgrid[grid_index + 0] - reg[0 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
-                    float ymin = (meshgrid[grid_index + 1] - reg[1 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
-                    float xmax = (meshgrid[grid_index + 0] + reg[2 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
-                    float ymax = (meshgrid[grid_index + 1] + reg[3 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float xmin = (mesh_0 - reg[0 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float ymin = (mesh_1 - reg[1 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float xmax = (mesh_0 + reg[2 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float ymax = (mesh_1 + reg[3 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
 
                     xmin = xmin > 0 ? xmin : 0;
                     ymin = ymin > 0 ? ymin : 0;
@@ -205,8 +201,8 @@ namespace yolov8 {
 
                         for (int kc = 0; kc < keypoint_num; kc++) {
                             KeyPoint kp;
-                            kp.x = (pose[(kc * 3 + 0) * grid_w * grid_h + h * grid_h + w] * 2 + (meshgrid[grid_index + 0] - 0.5)) * strides[head_index] / input_w;
-                            kp.y = (pose[(kc * 3 + 1) * grid_w * grid_h + h * grid_h + w] * 2 + (meshgrid[grid_index + 1] - 0.5)) * strides[head_index] / input_h;
+                            kp.x = (pose[(kc * 3 + 0) * grid_w * grid_h + h * grid_h + w] * 2 + (mesh_0 - 0.5)) * strides[head_index] / input_w;
+                            kp.y = (pose[(kc * 3 + 1) * grid_w * grid_h + h * grid_h + w] * 2 + (mesh_1 - 0.5)) * strides[head_index] / input_h;
                             kp.score = sigmoid(pose[(kc * 3 + 2) * grid_w * grid_h + h * grid_h + w]);
                             kp.id = kc;
                             temp.keyPoints.push_back(kp);
@@ -220,7 +216,7 @@ namespace yolov8 {
 
     void process_seg(
         float* cls, float* reg, float* msk, std::vector<Yolov8Rect> &results,
-        std::vector<float> meshgrid, int input_w, int input_h, 
+        int input_w, int input_h, 
         float &cls_max, int &cls_index, int &grid_index, 
         int head_index, int class_num, float conf_thres
     ) {
@@ -228,8 +224,13 @@ namespace yolov8 {
         int grid_w = mapSize[head_index][0];
         int grid_h = mapSize[head_index][1];
 
+        float mesh_0 = .0f;
+        float mesh_1 = .0f;
         for (int h = 0; h < grid_w; h++) {
             for (int w = 0; w < grid_h; w++) {
+                mesh_0 = float(w + 0.5);
+                mesh_1 = float(h + 0.5);
+
                 grid_index += 2;
 
                 for (int cl = 0; cl < class_num; cl++) {
@@ -250,10 +251,10 @@ namespace yolov8 {
                 if (cls_max > conf_thres) {
                     Yolov8Rect temp;
 
-                    float xmin = (meshgrid[grid_index + 0] - reg[0 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
-                    float ymin = (meshgrid[grid_index + 1] - reg[1 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
-                    float xmax = (meshgrid[grid_index + 0] + reg[2 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
-                    float ymax = (meshgrid[grid_index + 1] + reg[3 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float xmin = (mesh_0 - reg[0 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float ymin = (mesh_1 - reg[1 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float xmax = (mesh_0 + reg[2 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
+                    float ymax = (mesh_1 + reg[3 * grid_w * grid_h + h * grid_h + w]) * strides[head_index];
 
                     xmin = xmin > 0 ? xmin : 0;
                     ymin = ymin > 0 ? ymin : 0;
@@ -284,8 +285,6 @@ namespace yolov8 {
         int input_w, int input_h, int class_num,
         float conf_thres, float nms_thres
     ) {
-        static auto meshgrid = GenerateMeshgrid();
-
         int gridIndex = -2;
     
         float cls_max = 0;
@@ -298,7 +297,7 @@ namespace yolov8 {
             float* cls = (float* )preds[index * 2 + 1];
 
             process_det(
-                cls, reg, detect_results, meshgrid, input_w, input_h, cls_max,
+                cls, reg, detect_results, input_w, input_h, cls_max,
                 cls_index, gridIndex, index, class_num, conf_thres
             );
         }
@@ -345,8 +344,6 @@ namespace yolov8 {
         int input_w, int input_h, int class_num,
         float conf_thres, float nms_thres
     ) {
-        static auto meshgrid = GenerateMeshgrid();
-
         int gridIndex = -2;
     
         float cls_max = 0;
@@ -360,7 +357,7 @@ namespace yolov8 {
             float *pose = (float *)preds[index + headNum * 2];
 
             process_pose(
-                cls, reg, pose, pose_results, meshgrid, input_w, input_h, 
+                cls, reg, pose, pose_results, input_w, input_h, 
                 cls_max, cls_index, gridIndex, index, class_num, conf_thres
             );
         }
@@ -415,8 +412,6 @@ namespace yolov8 {
         int input_w, int input_h, int class_num,
         float conf_thres, float nms_thres
     ) {
-        static auto meshgrid = GenerateMeshgrid();
-
         int gridIndex = -2;
     
         float cls_max = 0;
@@ -430,7 +425,7 @@ namespace yolov8 {
             float* msk  = (float* )preds[index + headNum * 2];
 
             process_seg(
-                cls, reg, msk, seg_results, meshgrid, input_w, input_h, 
+                cls, reg, msk, seg_results, input_w, input_h, 
                 cls_max, cls_index, gridIndex, index, class_num, conf_thres
             );
         }
