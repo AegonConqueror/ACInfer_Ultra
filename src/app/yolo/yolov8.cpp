@@ -6,7 +6,7 @@
 #include "process/yolov8_postprocess.h"
 
 void yolov8_pose_decode_gpu(
-    float** preds, int* d_size, 
+    float* output_data, int* output_size, int output_num,
     int* num_dets, int* det_classes, float* det_scores, float* det_boxes, float* det_keypoints,
     int input_w, int input_h, int image_w, int image_h, int class_num,
     float conf_thres, float nms_thres, int keypoint_num
@@ -44,7 +44,8 @@ namespace YOLOv8 {
         virtual error_e Run(const cv::Mat &frame, std::vector<yolov8_result> &objects) override;
     private:
         error_e preprocess(const cv::Mat &src_frame, cv::Mat &dst_frame, cv::Mat &timg);
-        error_e postprocess(const cv::Mat &frame, std::vector<yolov8_result> &objects);
+        error_e inference(InferenceData &output_data);
+        error_e postprocess(const cv::Mat &frame, InferenceData &output_data, std::vector<yolov8_result> &objects);
 
     private:
         std::shared_ptr<ACEngine>   engine_;
@@ -90,7 +91,12 @@ namespace YOLOv8 {
         return SUCCESS;
     }
 
-    error_e ModelImpl::postprocess(const cv::Mat &frame, std::vector<yolov8_result> &objects) {
+    error_e ModelImpl::inference(InferenceData &infer_output_data) {
+        engine_->GetInferOutput(infer_output_data);
+        return SUCCESS;
+    }
+
+    error_e ModelImpl::postprocess(const cv::Mat &frame, InferenceData &infer_output_data, std::vector<yolov8_result> &objects) {
         int input_w     = input_attr_.dims[3];
         int input_h     = input_attr_.dims[2];
         int image_w     = frame.cols;
@@ -98,62 +104,75 @@ namespace YOLOv8 {
 
         int keypoint_num = 17;
 
-        InferenceData infer_output_data;
-        engine_->GetInferOutput(infer_output_data);
-
         size_t output_num = infer_output_data.size();
 
-        void *output_data[output_num];
-
-        std::vector<float> detectiont_rects;
-        std::vector<std::map<int, KeyPoint>> pose_keypoints;
-
+        // ============== pose ==============
         std::vector<std::string> pose_names = {"reg1", "cls1", "reg2", "cls2", "reg3", "cls3", "ps1", "ps2", "ps3"};
-            
         if (pose_names.size() != output_num) return LOAD_MODEL_FAIL;
 
-        for (size_t i = 0; i < output_num; i++) {
-            output_data[i] = (void *)infer_output_data[engine_->GetOutputIndex(pose_names[i])].first;
-        }
-
-        LOG_INFO("using gpu kernel decode pose");
-        int output_size[output_num];
-        for (size_t i = 0; i < output_num; i++) {
+        std::vector<int> output_size(output_num);
+        for (size_t i = 0; i < output_num; ++i) {
             output_size[i] = infer_output_data[engine_->GetOutputIndex(pose_names[i])].second;
         }
 
+        int total_size = std::accumulate(output_size.begin(), output_size.end(), 0);
+
+        int batchSize = 2;
+
+        float* output_data = (float*)malloc(total_size * sizeof(float) * batchSize);
+
+        for (size_t batch = 0; batch < batchSize; batch++) {
+            int pos = 0;
+            for (size_t i = 0; i < output_num; ++i) {
+                float* src = (float *)infer_output_data[engine_->GetOutputIndex(pose_names[i])].first;
+                size_t offset = output_size[i];
+
+                memcpy(output_data + pos + batch * total_size, src, offset * sizeof(float));
+                pos += offset;
+            }
+        }
+
+        // LOG_INFO(">>>>> result 1: %f -> 2:%f", output_data[0], output_data[0 + total_size]);
+        // LOG_INFO(">>>>> result 1: %f -> 2:%f", output_data[120], output_data[120 + total_size]);
+        // LOG_INFO(">>>>> result 1: %f -> 2:%f", output_data[1243], output_data[1243 + total_size]);
+        // LOG_INFO(">>>>> result 1: %f -> 2:%f", output_data[633], output_data[633 + total_size]);
+        
+        LOG_INFO("using gpu kernel decode pose");
+
         int keepTopK = 20;
         
-        int num_dets[1];
-        int det_classes[1 * keepTopK]; 
-        float det_scores[1 * keepTopK]; 
-        float det_boxes[1 * keepTopK * 4];
-        float det_keypoints[1 * keepTopK * 3 * keypoint_num];
+        int num_dets[1 * batchSize];
+        int det_classes[1 * keepTopK * batchSize]; 
+        float det_scores[1 * keepTopK * batchSize]; 
+        float det_boxes[1 * keepTopK * 4 * batchSize];
+        float det_keypoints[1 * keepTopK * 3 * keypoint_num * batchSize];
 
         yolov8_pose_decode_gpu(
-            (float **)output_data, output_size, 
+            output_data, output_size.data(), output_num, 
             num_dets, det_classes, det_scores, det_boxes, det_keypoints,
             input_w, input_h, image_w, image_h, model_class_num_,
             0.45, 0.45, keypoint_num
         );
 
-        for (int i = 0; i < num_dets[0]; i++) {
+        LOG_INFO("result 1: %d 2:%d", num_dets[0], num_dets[1]);
+
+        for (int i = 0; i < num_dets[1]; i++) {
             yolov8_result dr;
 
-            int classId = det_classes[i];
-            float conf = det_scores[i];
+            int classId = det_classes[i + keepTopK];
+            float conf = det_scores[i + keepTopK];
             
-            int xmin = int(det_boxes[i * 4 + 0]);
-            int ymin = int(det_boxes[i * 4 + 1]);
-            int xmax = int(det_boxes[i * 4 + 2]);
-            int ymax = int(det_boxes[i * 4 + 3]);
+            int xmin = int(det_boxes[i * 4 + 0 + keepTopK * 4]);
+            int ymin = int(det_boxes[i * 4 + 1 + keepTopK * 4]);
+            int xmax = int(det_boxes[i * 4 + 2 + keepTopK * 4]);
+            int ymax = int(det_boxes[i * 4 + 3 + keepTopK * 4]);
 
             std::map<int, KeyPoint> kp_map;
             for (int k = 0; k < keypoint_num; k++) {
                 KeyPoint kp;
-                kp.x = det_keypoints[k * keypoint_num * 3 + i * 3 + 0];
-                kp.y = det_keypoints[k * keypoint_num * 3 + i * 3 + 1];
-                kp.score = det_keypoints[k * keypoint_num * 3 + i * 3 + 2];
+                kp.x = det_keypoints[k * keypoint_num * 3 + i * 3 + 0 + keepTopK * 3 * keypoint_num];
+                kp.y = det_keypoints[k * keypoint_num * 3 + i * 3 + 1 + keepTopK * 3 * keypoint_num];
+                kp.score = det_keypoints[k * keypoint_num * 3 + i * 3 + 2 + keepTopK * 3 * keypoint_num];
                 kp.id = k;
                 kp_map[k] = kp;
             }
@@ -170,20 +189,35 @@ namespace YOLOv8 {
     }
 
     error_e ModelImpl::Run(const cv::Mat &frame, std::vector<yolov8_result> &objects) {
+        auto time_start = iTime::timestamp_now_float();
+
         cv::Mat letterbox_frame, timg;
         auto ret = preprocess(frame, letterbox_frame, timg);
         if (ret != SUCCESS){
             LOG_ERROR("yolov8 preprocess fail ...");
             return ret;
         }
-
+        
         InferenceData infer_input_data;
         infer_input_data.emplace_back(
             std::make_pair((void *)timg.ptr<float>(), timg.total() * timg.elemSize())
         );
         engine_->BindingInput(infer_input_data);
 
-        ret = postprocess(letterbox_frame, objects);
+        auto time_1 = iTime::timestamp_now_float();
+        LOG_INFO("preprocess use %f ms !", time_1 - time_start);
+
+        InferenceData infer_output_data;
+        ret = inference(infer_output_data);
+        if (ret != SUCCESS){
+            LOG_ERROR("yolov8 inference fail ...");
+            return ret;
+        }
+
+        auto time_2 = iTime::timestamp_now_float();
+        LOG_INFO("inference use %f ms !", time_2 - time_1);
+
+        ret = postprocess(letterbox_frame, infer_output_data, objects);
         if (ret != SUCCESS){
             LOG_ERROR("yolov8 postprocess fail ...");
             return ret;
@@ -191,6 +225,8 @@ namespace YOLOv8 {
 
         letterbox_decode(objects, letterbox_info_.hor, letterbox_info_.pad, task_type_);
 
+        auto time_3 = iTime::timestamp_now_float();
+        LOG_INFO("postprocess use %f ms !", time_3 - time_2);
         return SUCCESS;
     }
 

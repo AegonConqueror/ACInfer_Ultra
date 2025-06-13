@@ -37,7 +37,8 @@ if(USE_TENSORRT)
         ${CMAKE_CURRENT_SOURCE_DIR}/engine/builder/trt_builder.cpp
     )
     target_link_libraries(build_trt_engine PRIVATE tensorrt_utils)
-    target_link_libraries(build_trt_engine PRIVATE -Wl,--no-as-needed customLayerPlugin yolov8PoseLayerPlugin)
+    target_link_libraries(build_trt_engine PRIVATE -Wl,--no-as-needed customLayerPlugin)
+    # target_link_libraries(build_trt_engine PRIVATE -Wl,--no-as-needed customLayerPlugin yolov8PoseLayerPlugin)
     set_target_properties(build_trt_engine PROPERTIES CUDA_ARCHITECTURES "61;70;75")
 
 endif(USE_TENSORRT)
