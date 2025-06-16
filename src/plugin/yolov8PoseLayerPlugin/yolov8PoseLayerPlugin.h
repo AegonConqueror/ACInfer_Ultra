@@ -21,6 +21,8 @@
 #include <cuda_runtime_api.h>
 #include "NvInferPlugin.h"
 
+#include "yolov8PoseLayerParameters.h"
+
 namespace {
     const char *YOLOV8POSELAYER_PLUGIN_VERSION{"1"};
     const char *YOLOV8POSELAYER_PLUGIN_NAME{"Yolov8PoseLayer"};
@@ -29,9 +31,9 @@ namespace {
 class YOLOv8PoseLayer : public nvinfer1::IPluginV2DynamicExt {
 public:
     // ============================= 构造函数与析构函数 =============================
+    explicit YOLOv8PoseLayer(YOLOv8PoseLayerParameters params);
     YOLOv8PoseLayer(void const *data, size_t length);
-    YOLOv8PoseLayer(const uint &max_stride, const float &socre_threshold, const float &nms_threshold);
-
+    
     nvinfer1::IPluginV2DynamicExt* clone() const noexcept override;
 
     // ============================= 输出相关函数 =============================
@@ -75,7 +77,7 @@ public:
     size_t getWorkspaceSize(
         nvinfer1::PluginTensorDesc const* inputs, int32_t nbInputs, 
         nvinfer1::PluginTensorDesc const* outputs, int32_t nbOutputs
-    ) const noexcept override { return 0; }
+    ) const noexcept override;
 
     int32_t enqueue(
         nvinfer1::PluginTensorDesc const* inputDesc, nvinfer1::PluginTensorDesc const* outputDesc,
@@ -88,22 +90,8 @@ public:
     nvinfer1::AsciiChar const* getPluginNamespace() const noexcept override { return m_Namespace.c_str(); }
 
 private:
-    std::string m_Namespace{""};
-
-    int m_maxStride{0};
-    int m_numClasses{0};
-    int m_keyPoints{0};
-    int m_netWidth{0};
-    int m_netHeight{0};
-    int m_totalAnchors{0};
-    
-    float m_socreThreshold{0};
-    float m_nmsThreshold{0};
-
-    std::vector<int> m_mapSize;
-    std::vector<int> m_headStarts;
-
-    uint64_t m_OutputSize{0};
+    std::string m_Namespace;
+    YOLOv8PoseLayerParameters mParam{};
 };
 
 class YOLOv8PoseLayerPluginCreator : public nvinfer1::IPluginCreator {
@@ -130,6 +118,7 @@ public:
 
 private:
     std::string mNamespace;
+    YOLOv8PoseLayerParameters mParam;
     static nvinfer1::PluginFieldCollection mFC;
     static std::vector<nvinfer1::PluginField> mPluginAttributes;
 };

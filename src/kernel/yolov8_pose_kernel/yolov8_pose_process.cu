@@ -4,41 +4,31 @@
 
 #include "yolo/yolov8_type.h"
 
-struct KeyPointGPU {
-    float x, y;
-    float score;
-};
-
-struct PoseRectGPU {
-    int imageId;
-    int xmin, ymin, xmax, ymax;
-    int classId;
-    float score;
-    KeyPointGPU keypoints[17];
-};
-
 __device__ 
 float sigmoid_gpu(float x) {
     return 1.0f / (1.0f + expf(-x));
 }
 
 __device__
-float iou_gpu(const PoseRectGPU &a, const PoseRectGPU &b) {
-    float xmin = fmaxf(a.xmin, b.xmin);
-    float ymin = fmaxf(a.ymin, b.ymin);
-    float xmax = fminf(a.xmax, b.xmax);
-    float ymax = fminf(a.ymax, b.ymax);
+float iou_gpu(
+    const int xmin_A, const int ymin_A, const int xmax_A, const int ymax_A,
+    const int xmin_B, const int ymin_B, const int xmax_B, const int ymax_B
+) {
+    float xmin = fmaxf(xmin_A, xmin_B);
+    float ymin = fmaxf(ymin_A, ymin_B);
+    float xmax = fminf(xmax_A, xmax_B);
+    float ymax = fminf(ymax_A, ymax_B);
     float iw = fmaxf(0.0f, xmax - xmin);
     float ih = fmaxf(0.0f, ymax - ymin);
     float inter = iw * ih;
-    float area1 = (a.xmax - a.xmin) * (a.ymax - a.ymin);
-    float area2 = (b.xmax - b.xmin) * (b.ymax - b.ymin);
+    float area1 = (xmax_A- xmin_A) * (ymax_A - ymin_A);
+    float area2 = (xmax_B - xmin_B) * (ymax_B - ymin_B);
     return inter / (area1 + area2 - inter);
 }
 
 __global__
 void yolov8_pose_decode_kernel(
-    float* pBlob, int* pBlob_offset, PoseRectGPU* outputRects, int* obj_count, int* keep,
+    float* pBlob, int* pBlob_offset, int* outputRects, float* outputSocres, int* obj_count, int* keep,
     int* objectNum, int* det_classes, float* det_scores, float* det_boxes, float* det_keypoints,
     int total_size, int headNum, int total_anchors, int head_start, int head_end, int min_stride, 
     int input_w, int input_h, int image_w, int image_h, 
@@ -68,8 +58,6 @@ void yolov8_pose_decode_kernel(
     int local_idx = base_tid - local_start;
     int row = local_idx / w;
     int col = local_idx % w;
-
-    int batch_offset = imageIdx * total_anchors;
     
     float* reg = pBlob + pBlob_offset[head_idx * 2 + 0] + imageIdx * total_size;
     float* cls = pBlob + pBlob_offset[head_idx * 2 + 1] + imageIdx * total_size;
@@ -79,7 +67,6 @@ void yolov8_pose_decode_kernel(
     //     printf("reg %d, %f -- %f\n", total_anchors, pBlob[1000], pBlob[1000 + imageIdx * total_size]);
     // }
     
-
     float cx = float(col + 0.5);
     float cy = float(row + 0.5);
 
@@ -110,64 +97,70 @@ void yolov8_pose_decode_kernel(
     xmax = fminf(input_w, xmax);
     ymax = fminf(input_h, ymax);
 
+    int batch_offset = imageIdx * total_anchors;
     int id = atomicAdd(&obj_count[imageIdx], 1);
-    keep[id + batch_offset] = 1;
 
-    PoseRectGPU& temp = outputRects[id + batch_offset];
-    temp.imageId = imageIdx;
-    temp.xmin = int(xmin * image_w / input_w + 0.5);
-    temp.ymin = int(ymin * image_h / input_h + 0.5);
-    temp.xmax = int(xmax * image_w / input_w + 0.5);
-    temp.ymax = int(ymax * image_h / input_h + 0.5);
-    temp.classId = cls_index;
-    temp.score = cls_max;
+    int index_i = id + batch_offset;
 
-    for (int kc = 0; kc < num_keypoints; kc++) {
-        temp.keypoints[kc].x = (ps[(kc * 3 + 0) * h * w + row * w + col] * 2 + (cx - 0.5f)) * stride * image_w / input_w;
-        temp.keypoints[kc].y = (ps[(kc * 3 + 1) * h * w + row * w + col] * 2 + (cy - 0.5f)) * stride * image_h / input_h;
-        temp.keypoints[kc].score = sigmoid_gpu(ps[(kc * 3 + 2) * h * w + row * w + col]);
-    }
+    keep[index_i] = 1;
+
+    int* index_i_rect = outputRects + index_i * (4 + 1);
+    float* index_i_score = outputSocres + index_i;
+    index_i_rect[0] = int(xmin * image_w / input_w + 0.5);
+    index_i_rect[1] = int(ymin * image_h / input_h + 0.5);
+    index_i_rect[2] = int(xmax * image_w / input_w + 0.5);
+    index_i_rect[3] = int(ymax * image_h / input_h + 0.5);
+    index_i_rect[4] = cls_index;
+    index_i_score[0] = cls_max;
 
     __syncthreads();
 
     for (int j = 0; j < obj_count[imageIdx]; j++) {
-        if (id + batch_offset == j + batch_offset || keep[j + batch_offset] == 0) continue;
+        int index_j = j + batch_offset;
+
+        int* index_j_rect = outputRects + index_j * (4 + 1);
+        float* index_j_score = outputSocres + index_j;
+
+        if (index_i == index_j || keep[index_j] == 0) continue;
         if (
-            outputRects[id + batch_offset].score < outputRects[j + batch_offset].score && 
-            outputRects[id + batch_offset].classId == outputRects[j + batch_offset].classId &&
-            outputRects[id + batch_offset].imageId == outputRects[j + batch_offset].imageId
+            index_i_score[0] < index_j_score[0] && 
+            index_i_rect[4] == index_j_rect[4]
         ) {
-            float iou = iou_gpu(outputRects[id + batch_offset], outputRects[j + batch_offset]);
+            float iou = iou_gpu(
+                index_i_rect[0], index_i_rect[1], index_i_rect[2], index_i_rect[3], 
+                index_j_rect[0], index_j_rect[1], index_j_rect[2], index_j_rect[3]
+            );
             if (iou > nms_thresh) {
-                keep[id + batch_offset] = 0;
+                keep[index_i] = 0;
             }
         }
     }
 
     __syncthreads();
 
-    if (keep[id + batch_offset] == 1) {
+    if (keep[index_i] == 1) {
         // NumDetections
         int kid = atomicAdd(&objectNum[imageIdx], 1);
 
         // DetectionClasses
-        det_classes[kid + imageIdx * 20] = outputRects[id + batch_offset].classId;
+        det_classes[kid + imageIdx * 20] = index_i_rect[4];
 
         // DetectionScores
-        det_scores[kid + imageIdx * 20] = outputRects[id + batch_offset].score;
+        det_scores[kid + imageIdx * 20] = index_i_score[0];
 
         // DetectionBoxes
-        det_boxes[(kid + imageIdx * 20) * 4 + 0] = outputRects[id + batch_offset].xmin;
-        det_boxes[(kid + imageIdx * 20) * 4 + 1] = outputRects[id + batch_offset].ymin;
-        det_boxes[(kid + imageIdx * 20) * 4 + 2] = outputRects[id + batch_offset].xmax;
-        det_boxes[(kid + imageIdx * 20) * 4 + 3] = outputRects[id + batch_offset].ymax;
+        det_boxes[(kid + imageIdx * 20) * 4 + 0] = index_i_rect[0];
+        det_boxes[(kid + imageIdx * 20) * 4 + 1] = index_i_rect[1];
+        det_boxes[(kid + imageIdx * 20) * 4 + 2] = index_i_rect[2];
+        det_boxes[(kid + imageIdx * 20) * 4 + 3] = index_i_rect[3];
 
         // DetectionKeyPoints
         // float* det_keypoints_batch = det_keypoints + imageIdx * 20 * 3 * num_keypoints;
-        for (int k = 0; k < num_keypoints; k++) {
-            det_keypoints[(k + imageIdx * 20) * num_keypoints * 3 + kid * 3 + 0] = outputRects[id + batch_offset].keypoints[k].x;
-            det_keypoints[(k + imageIdx * 20) * num_keypoints * 3 + kid * 3 + 1] = outputRects[id + batch_offset].keypoints[k].y;
-            det_keypoints[(k + imageIdx * 20) * num_keypoints * 3 + kid * 3 + 2] = outputRects[id + batch_offset].keypoints[k].score;
+
+        for (int kc = 0; kc < num_keypoints; kc++) {
+            det_keypoints[(kc + imageIdx * 20) * num_keypoints * 3 + kid * 3 + 0] = (ps[(kc * 3 + 0) * h * w + row * w + col] * 2 + (cx - 0.5f)) * stride * image_w / input_w;
+            det_keypoints[(kc + imageIdx * 20) * num_keypoints * 3 + kid * 3 + 1] = (ps[(kc * 3 + 1) * h * w + row * w + col] * 2 + (cy - 0.5f)) * stride * image_h / input_h;
+            det_keypoints[(kc + imageIdx * 20) * num_keypoints * 3 + kid * 3 + 2] = sigmoid_gpu(ps[(kc * 3 + 2) * h * w + row * w + col]);
         }
     }
 }
@@ -207,10 +200,14 @@ void yolov8_pose_decode_gpu(
     checkCudaRuntime(cudaMalloc(&d_pBlob_offset, output_num * sizeof(int)));
     checkCudaRuntime(cudaMemcpy(d_pBlob_offset, pBlob_offset, output_num * sizeof(int), cudaMemcpyHostToDevice));
     
-    PoseRectGPU* d_output_objects;
+    int* d_output_rects;
+    float* d_output_scores;
     int* d_objectCount;
     int* d_keep;
-    checkCudaRuntime(cudaMalloc(&d_output_objects, sizeof(PoseRectGPU) * total_anchors * batchSize));
+    checkCudaRuntime(cudaMalloc(&d_output_rects, (4 + 1) * sizeof(int) * total_anchors * batchSize));
+    checkCudaRuntime(cudaMemset(d_output_rects, 0, (4 + 1) * sizeof(int) * total_anchors * batchSize));
+    checkCudaRuntime(cudaMalloc(&d_output_scores, sizeof(float) * total_anchors * batchSize));
+    checkCudaRuntime(cudaMemset(d_output_scores, 0, sizeof(float) * total_anchors * batchSize));
     checkCudaRuntime(cudaMalloc(&d_objectCount, sizeof(int) * batchSize));
     checkCudaRuntime(cudaMemset(d_objectCount, 0, sizeof(int) * batchSize));
     checkCudaRuntime(cudaMalloc(&d_keep, sizeof(int) * total_anchors * batchSize));
@@ -243,7 +240,7 @@ void yolov8_pose_decode_gpu(
 
     checkCudaKernel(
         yolov8_pose_decode_kernel<<<grid, block>>>(
-            d_output_data, d_pBlob_offset, d_output_objects, d_objectCount, d_keep, 
+            d_output_data, d_pBlob_offset, d_output_rects, d_output_scores, d_objectCount, d_keep, 
             num_detections, detection_classes, detection_scores, detection_boxes, detection_keypoints,
             total_size, headNum, total_anchors, head_start[1], head_start[2], min_stride, 
             input_w, input_h, image_w, image_h, class_num, keypoint_num, conf_thresh, nms_thresh
@@ -264,7 +261,8 @@ void yolov8_pose_decode_gpu(
 
     checkCudaRuntime(cudaFree(d_keep));
     checkCudaRuntime(cudaFree(d_objectCount));
-    checkCudaRuntime(cudaFree(d_output_objects));
+    checkCudaRuntime(cudaFree(d_output_scores));
+    checkCudaRuntime(cudaFree(d_output_rects));
     checkCudaRuntime(cudaFree(d_pBlob_offset));
     checkCudaRuntime(cudaFree(d_output_data));
 }

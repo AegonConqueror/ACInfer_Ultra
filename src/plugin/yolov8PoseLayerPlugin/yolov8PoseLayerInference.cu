@@ -1,18 +1,6 @@
 
-#include <stdint.h>
-#include "trt/trt_cuda.h"
-
-struct KeyPointGPU {
-    float x, y;
-    float score;
-};
-
-struct PoseRectGPU {
-    float xmin, ymin, xmax, ymax;
-    int classId;
-    float score;
-    KeyPointGPU keypoints[17];
-};
+#include "cuda_runtime_api.h"
+#include "yolov8PoseLayerParameters.h"
 
 __device__ 
 float sigmoid_gpu(float x) {
@@ -20,79 +8,67 @@ float sigmoid_gpu(float x) {
 }
 
 __device__
-float iou_gpu(const PoseRectGPU &a, const PoseRectGPU &b) {
-    float xmin = fmaxf(a.xmin, b.xmin);
-    float ymin = fmaxf(a.ymin, b.ymin);
-    float xmax = fminf(a.xmax, b.xmax);
-    float ymax = fminf(a.ymax, b.ymax);
+float iou_gpu(
+    const int xmin_A, const int ymin_A, const int xmax_A, const int ymax_A,
+    const int xmin_B, const int ymin_B, const int xmax_B, const int ymax_B
+) {
+    float xmin = fmaxf(xmin_A, xmin_B);
+    float ymin = fmaxf(ymin_A, ymin_B);
+    float xmax = fminf(xmax_A, xmax_B);
+    float ymax = fminf(ymax_A, ymax_B);
     float iw = fmaxf(0.0f, xmax - xmin);
     float ih = fmaxf(0.0f, ymax - ymin);
     float inter = iw * ih;
-    float area1 = (a.xmax - a.xmin) * (a.ymax - a.ymin);
-    float area2 = (b.xmax - b.xmin) * (b.ymax - b.ymin);
+    float area1 = (xmax_A- xmin_A) * (ymax_A - ymin_A);
+    float area2 = (xmax_B - xmin_B) * (ymax_B - ymin_B);
     return inter / (area1 + area2 - inter);
 }
-
 __global__
-void nms_kernel(const PoseRectGPU* dets, int* keep, int num, float iou_thresh) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= num || keep[i] == 0) return;
-    for (int j = 0; j < num; j++) {
-        if (i == j || keep[j] == 0) continue;
-        if (dets[i].score < dets[j].score && dets[i].classId == dets[j].classId) {
-            float iou = iou_gpu(dets[i], dets[j]);
-            if (iou > iou_thresh) keep[i] = 0;
-        }
-    }
-}
-
-__global__
-void yolov8_pose_decode_kernel(
-    float* input, int* obj_count, PoseRectGPU* outputRects,
-    const uint& maxStride, const uint& numClasses, const uint& keyPoints, const uint& totalAnchors,
-    const uint& input_w, const uint& input_h,
-    const float& scoreThreshold,
-    const int* mapSize, const int* headStarts
+void YOLOv8PoseLayerNMS(
+    YOLOv8PoseLayerParameters param,
+    const float* reg1Data, const float* reg2Data, const float* reg3Data, 
+    const float* cls1Data, const float* cls2Data, const float* cls3Data, 
+    const float* ps1Data, const float* ps2Data, const float* ps3Data,
+    int* outputRects, float* outputSocres, int* outputCount, int* outputKeep,
+    int* __restrict__ numDetectionsOutput, int* __restrict__ nmsClassesOutput, 
+    float* __restrict__ nmsScoresOutput, float* __restrict__ nmsBoxesOutput, 
+    float* __restrict__ nmsKeyPointsOutput
 ) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= totalAnchors) return;
+    int imageIdx = blockIdx.x;
+    int anchorIdx = blockIdx.y * blockDim.x + threadIdx.x;
+    if (imageIdx >= 2) return;
+    if (anchorIdx >= param.numAnchors) return;
 
-    int head_idx = -1;
-    for (int i = 0; i < 3; i++) {
-        int start = headStarts[i];
-        int end = (i + 1 < 3) ? headStarts[i + 1] : totalAnchors;
-        if (tid >= start && tid < end) {
-            head_idx = i;
-            break;
-        }
-    }
+    int head_idx = 0;
+    int base_tid = anchorIdx % param.numAnchors;
 
-    if (head_idx == -1) return;
+    if (base_tid < param.headStart)
+        head_idx = 0;
+    else if (base_tid < param.headEnd)
+        head_idx = 1;
+    else
+        head_idx = 2;
 
-    int h = mapSize[head_idx * 2 ];
-    int w = mapSize[head_idx * 2];
-    int local_idx = tid - headStarts[head_idx];
+    int local_start = (head_idx == 1) * param.headStart + (head_idx == 2) * param.headEnd;
+    
+    int stride = param.minStride << head_idx;
+
+    int h = param.inputHeight / stride;
+    int w = param.inputWidth / stride;
+    int local_idx = base_tid - local_start;
     int row = local_idx / w;
     int col = local_idx % w;
+    
+    const float* reg = (head_idx == 0) ? reg1Data + imageIdx * param.reg1Size : ((head_idx == 1) ? reg2Data + imageIdx * param.reg2Size: reg3Data + imageIdx * param.reg3Size);
+    const float* cls = (head_idx == 0) ? cls1Data + imageIdx * param.cls1Size: ((head_idx == 1) ? cls2Data + imageIdx * param.cls2Size : cls3Data + imageIdx * param.cls3Size);
+    const float* ps  = (head_idx == 0) ? ps1Data + imageIdx * param.ps1Size : ((head_idx == 1) ? ps2Data + imageIdx * param.ps2Size : ps3Data + imageIdx * param.ps3Size);
 
-    int stride_index = static_cast<int>(0.5 * head_idx * head_idx - 2.5 * head_idx + 4);
-    int stride = maxStride / stride_index;
-
-    int reg_input_size = 4 * mapSize[0] * mapSize[0];
-    int cls_input_size = numClasses * mapSize[0] * mapSize[0];
-    int pose_input_size = 3 * keyPoints * mapSize[0] * mapSize[0];
-
-    float* reg = input + head_idx * (reg_input_size + cls_input_size);
-    float* cls = reg + reg_input_size;
-    float* ps  = input + 3 * (reg_input_size + cls_input_size) + head_idx * pose_input_size;
-    float* meshgrid = input + 3 * (reg_input_size + cls_input_size + pose_input_size);
-
-    float cx = meshgrid[tid * 2];
-    float cy = meshgrid[tid * 2 + 1];
+    float cx = float(col + 0.5);
+    float cy = float(row + 0.5);
 
     float cls_max = -1;
     int cls_index = -1;
-    for (int cl = 0; cl < numClasses; cl++) {
+    for (int cl = 0; cl < param.numClasses; cl++) {
         float cls_val = sigmoid_gpu(cls[cl * h * w + row * w + col]);
         if (cls_val > cls_max) {
             cls_max = cls_val;
@@ -100,7 +76,7 @@ void yolov8_pose_decode_kernel(
         }
     }
 
-    if (cls_max < scoreThreshold) return;
+    if (cls_max < param.scoreThreshold) return;
 
     float dx1 = reg[0 * h * w + row * w + col];
     float dy1 = reg[1 * h * w + row * w + col];
@@ -114,100 +90,148 @@ void yolov8_pose_decode_kernel(
     
     xmin = fmaxf(0.0f, xmin);
     ymin = fmaxf(0.0f, ymin);
-    xmax = fminf(input_w, xmax);
-    ymax = fminf(input_h, ymax);
+    xmax = fminf(param.inputWidth, xmax);
+    ymax = fminf(param.inputHeight, ymax);
 
-    int id = atomicAdd(obj_count, 1);
+    int batch_offset = imageIdx * param.numAnchors;
 
-    PoseRectGPU& temp = outputRects[id];
-    temp.xmin = xmin / input_w;
-    temp.ymin = ymin / input_h;
-    temp.xmax = xmax / input_w;
-    temp.ymax = ymax / input_h;
-    temp.classId = cls_index;
-    temp.score = cls_max;
+    int id = atomicAdd(&outputCount[imageIdx], 1);
 
-    for (int kc = 0; kc < keyPoints; kc++) {
-        temp.keypoints[kc].x = (ps[(kc * 3 + 0) * h * w + row * w + col] * 2 + (cx - 0.5f)) * stride / input_w;
-        temp.keypoints[kc].y = (ps[(kc * 3 + 1) * h * w + row * w + col] * 2 + (cy - 0.5f)) * stride / input_h;
-        temp.keypoints[kc].score = sigmoid_gpu(ps[(kc * 3 + 2) * h * w + row * w + col]);
+    int index_i = id + batch_offset;
+    outputKeep[index_i] = 1;
+
+    int* index_i_rect = outputRects + index_i * (4 + 1);
+    float* index_i_score = outputSocres + index_i;
+    index_i_rect[0] = int(xmin / param.inputWidth + 0.5);
+    index_i_rect[1] = int(ymin / param.inputHeight + 0.5);
+    index_i_rect[2] = int(xmax / param.inputWidth + 0.5);
+    index_i_rect[3] = int(ymax / param.inputHeight + 0.5);
+    index_i_rect[4] = cls_index;
+    index_i_score[0] = cls_max;
+
+    __syncthreads();
+
+    for (int j = 0; j < outputCount[imageIdx]; j++) {
+        int index_j = j + batch_offset;
+
+        int* index_j_rect = outputRects + index_j * (4 + 1);
+        float* index_j_score = outputSocres + index_j;
+
+        if (index_i == index_j || outputKeep[index_j] == 0) continue;
+        if (index_i_score[0] < index_j_score[0] &&  index_i_rect[4] == index_j_rect[4]) {
+            float iou = iou_gpu(
+                index_i_rect[0], index_i_rect[1], index_i_rect[2], index_i_rect[3], 
+                index_j_rect[0], index_j_rect[1], index_j_rect[2], index_j_rect[3]
+            );
+
+            if (iou > param.iouThreshold) {
+                outputKeep[index_i] = 0;
+            }
+        }
+    }
+
+    __syncthreads();
+
+    if (outputKeep[index_i] == 1) {
+        // NumDetections
+        int kid = atomicAdd(&numDetectionsOutput[imageIdx], 1);
+
+        // DetectionClasses
+        nmsClassesOutput[kid + imageIdx * param.numOutputBoxes] = index_i_rect[4];
+
+        // DetectionScores
+        nmsScoresOutput[kid + imageIdx * param.numOutputBoxes] = index_i_score[0];
+
+        // DetectionBoxes
+        nmsBoxesOutput[(kid + imageIdx * param.numOutputBoxes) * 4 + 0] = index_i_rect[0];
+        nmsBoxesOutput[(kid + imageIdx * param.numOutputBoxes) * 4 + 1] = index_i_rect[1];
+        nmsBoxesOutput[(kid + imageIdx * param.numOutputBoxes) * 4 + 2] = index_i_rect[2];
+        nmsBoxesOutput[(kid + imageIdx * param.numOutputBoxes) * 4 + 3] = index_i_rect[3];
+
+        // DetectionKeyPoints
+        // float* det_keypoints_batch = det_keypoints + imageIdx * topK * 3 * num_keypoints;
+        for (int k = 0; k < param.numKeypoints; k++) {
+            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 0] = (ps[(k * 3 + 0) * h * w + row * w + col] * 2 + (cx - 0.5f)) * stride  / param.inputWidth;
+            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 1] = (ps[(k * 3 + 1) * h * w + row * w + col] * 2 + (cy - 0.5f)) * stride  / param.inputHeight;
+            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 2] = sigmoid_gpu(ps[(k * 3 + 2) * h * w + row * w + col]);
+        }
     }
 }
 
+template <typename T>
+T* YOLOv8PoseLayerWorkspace(void* workspace, size_t& offset, size_t elements)
+{
+    T* buffer = (T*) ((size_t) workspace + offset);
+    size_t size = elements * sizeof(T);
+    offset += size;
+    return buffer;
+}
 
-cudaError_t yolov8PoseLayerInfernece(
-    float* input, int* num_dets, int* det_classes, float* det_scores, float* det_boxes, float* det_keypoints,
-    const uint& batchSize, uint64_t& inputSize, const uint& maxStride, 
-    const uint& numClasses, const uint& keyPoints, const uint& totalAnchors, 
-    const int* mapSize, const int* headStarts,
-    const float& scoreThreshold, const float& nmsThreshold,
-    cudaStream_t stream
+pluginStatus_t YOLOv8PoseLayerLauncher(
+    YOLOv8PoseLayerParameters param,
+    const void* reg1Input, const void* reg2Input, const void* reg3Input,
+    const void* cls1Input, const void* cls2Input, const void* cls3Input,
+    const void* ps1Input, const void* ps2Input, const void* ps3Input,
+    void* numDetectionsOutput, void* nmsClassesOutput, void* nmsScoresOutput, 
+    void* nmsBoxesOutput, void* nmsKeyPointsOutput, void* workspace, cudaStream_t stream
 ) {
-    int threads = 256;
-    int blocks = (totalAnchors + threads - 1) / threads;
+    cudaMemsetAsync(numDetectionsOutput, 0, sizeof(int) * param.batchSize, stream);
+    cudaMemsetAsync(nmsClassesOutput, 0, sizeof(int) * param.batchSize * param.numOutputBoxes, stream);
+    cudaMemsetAsync(nmsScoresOutput, 0, sizeof(float) * param.batchSize * param.numOutputBoxes, stream);
+    cudaMemsetAsync(nmsBoxesOutput, 0, sizeof(float) * param.batchSize * param.numOutputBoxes * 4, stream);
+    cudaMemsetAsync(nmsKeyPointsOutput, 0, sizeof(float) * param.batchSize * param.numOutputBoxes * param.numKeypoints * 3, stream);
 
-    uint input_w = mapSize[2] * maxStride;
-    uint input_h = mapSize[2] * maxStride;
+    // Counters Workspace
+    size_t workspaceOffset = 0;
+    int rects_element = (4 + 1) * param.batchSize * param.numAnchors;
+    int* outputRects = YOLOv8PoseLayerWorkspace<int>(workspace, workspaceOffset, rects_element);
 
-    PoseRectGPU* d_output_objects;
-    checkCudaRuntime(cudaMalloc(&d_output_objects, sizeof(PoseRectGPU) * totalAnchors));
-    int* d_objectCount;
-    checkCudaRuntime(cudaMalloc(&d_objectCount, sizeof(int)));
-    checkCudaRuntime(cudaMemset(d_objectCount, 0, sizeof(int)));
+    int socres_element = param.batchSize * param.numAnchors;
+    float* outputScores = YOLOv8PoseLayerWorkspace<float>(workspace, workspaceOffset, socres_element);
 
-    for (unsigned int batch = 0; batch < batchSize; ++batch) {
-        yolov8_pose_decode_kernel<<<blocks, threads, 0, stream>>>(
-            reinterpret_cast<float*>(input) + (batch * inputSize), d_objectCount, d_output_objects, 
-            maxStride, numClasses, keyPoints, totalAnchors, input_w, input_h, scoreThreshold, mapSize, headStarts
-        );
+    int count_element = param.batchSize;
+    int* outputCount = YOLOv8PoseLayerWorkspace<int>(workspace, workspaceOffset, count_element);
+    cudaMemsetAsync(outputCount, 0, sizeof(int) * param.batchSize, stream);
 
-        int object_num;
-        checkCudaRuntime(cudaMemcpy(&object_num, d_objectCount, sizeof(int), cudaMemcpyDeviceToHost));
+    int keep_element = param.batchSize * param.numAnchors;
+    int* outputKeep = YOLOv8PoseLayerWorkspace<int>(workspace, workspaceOffset, keep_element);
+    cudaMemsetAsync(outputKeep, -1, sizeof(int) * param.numAnchors * param.batchSize, stream);
 
-        int* d_keep;
-        checkCudaRuntime(cudaMalloc(&d_keep, sizeof(int) * object_num));
-        checkCudaRuntime(cudaMemset(d_keep, 1, sizeof(int) * object_num));
-        
-        checkCudaKernel(
-            nms_kernel<<<blocks, threads, 0, stream>>>(d_output_objects, d_keep, object_num, nmsThreshold);
-        );
+    int threadSize = 256;
+    dim3 block(threadSize, 1);
+    dim3 grid(param.batchSize, (param.numAnchors + threadSize - 1) / threadSize);
 
-        std::vector<PoseRectGPU> h_objects(object_num);
-        std::vector<int> h_keep(object_num);
-        checkCudaRuntime(cudaMemcpy(h_objects.data(), d_output_objects, sizeof(PoseRectGPU) * object_num, cudaMemcpyDeviceToHost));
-        checkCudaRuntime(cudaMemcpy(h_keep.data(), d_keep, sizeof(int) * object_num, cudaMemcpyDeviceToHost));
+    YOLOv8PoseLayerNMS(
+        param,
+        (const float *)reg1Input, (const float *)reg2Input, (const float *)reg3Input, 
+        (const float *)cls1Input, (const float *)cls2Input, (const float *)cls3Input, 
+        (const float *)ps1Input, (const float *)ps2Input, (const float *)ps3Input,
+        outputRects, outputScores, outputCount, outputKeep,
+        (int *)numDetectionsOutput, (int *)nmsClassesOutput, 
+        (float *)nmsScoresOutput, (float *)nmsBoxesOutput, 
+        (float *)nmsKeyPointsOutput
+    );
 
-        // NumDetections [batch_size, 1] 
-        num_dets[batch] = object_num;
+    cudaError_t status = cudaGetLastError();
+    CSC(status, STATUS_FAILURE);
 
-        for (int i = 0; i < object_num; i++) {
-            if (h_keep[i] == 0) continue;
-            auto& obj = h_objects[i];
+    return STATUS_SUCCESS;
+}
 
-            // DetectionClasses [batch_size, numboxes]
-            det_classes[batch * totalAnchors + i] = obj.classId;
-
-            // DetectionScores [batch_size, numboxes]
-            det_scores[batch * totalAnchors + i] = obj.score;
-
-            // DetectionBoxes [batch_size, numboxes, 4]
-            det_boxes[batch * totalAnchors * 4 + i * 4 + 0] = obj.xmin;
-            det_boxes[batch * totalAnchors * 4 + i * 4 + 1] = obj.ymin;
-            det_boxes[batch * totalAnchors * 4 + i * 4 + 2] = obj.xmax;
-            det_boxes[batch * totalAnchors * 4 + i * 4 + 3] = obj.ymax;
-
-            // DetectionKeyPoints [batch_size, numboxes, 3]
-            for (int k = 0; k < keyPoints; k++) {
-                det_keypoints[batch * totalAnchors * 3 + k * 3 + i + 0] = obj.keypoints[k].x;
-                det_keypoints[batch * totalAnchors * 3 + k * 3 + i + 1] = obj.keypoints[k].y;
-                det_keypoints[batch * totalAnchors * 3 + k * 3 + i + 2] = obj.keypoints[k].score;
-            }
-        }
-        checkCudaRuntime(cudaFree(d_keep));
-    }
-
-    checkCudaRuntime(cudaFree(d_objectCount));
-    checkCudaRuntime(cudaFree(d_output_objects));
-    
-    return cudaGetLastError();
+pluginStatus_t YOLOv8PoseLayerInference(
+    YOLOv8PoseLayerParameters param,
+    const void* reg1Input, const void* reg2Input, const void* reg3Input,
+    const void* cls1Input, const void* cls2Input, const void* cls3Input,
+    const void* ps1Input, const void* ps2Input, const void* ps3Input,
+    void* numDetectionsOutput, void* nmsClassesOutput, void* nmsScoresOutput, 
+    void* nmsBoxesOutput, void* nmsKeyPointsOutput, void* workspace, cudaStream_t stream
+) {
+    return YOLOv8PoseLayerLauncher(
+        param,
+        reg1Input, reg2Input, reg3Input,
+        cls1Input, cls2Input, cls3Input,
+        ps1Input, ps2Input, ps3Input,
+        numDetectionsOutput, nmsClassesOutput, nmsScoresOutput,
+        nmsBoxesOutput, nmsKeyPointsOutput, workspace, stream 
+    );
 }

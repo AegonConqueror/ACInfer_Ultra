@@ -3,9 +3,6 @@
 
 #include "trt/trt_cuda.h"
 
-#define NHEADNUM 3
-#define NBINPUTS 10
-
 namespace {
     template <typename T>
     void write(char *&buffer, const T &val) {
@@ -20,13 +17,13 @@ namespace {
     }
 }
 
-cudaError_t yolov8PoseLayerInfernece(
-    float* input, int* num_dets, int* det_classes, float* det_scores, float* det_boxes, float* det_keypoints,
-    const uint& batchSize, uint64_t& inputSize, const uint& maxStride, 
-    const uint& numClasses, const uint& keyPoints, const uint& totalAnchors, 
-    const int* mapSize, const int* headStarts,
-    const float& scoreThreshold, const float& nmsThreshold,
-    cudaStream_t stream
+pluginStatus_t YOLOv8PoseLayerInference(
+    YOLOv8PoseLayerParameters param,
+    const void* reg1Input, const void* reg2Input, const void* reg3Input,
+    const void* cls1Input, const void* cls2Input, const void* cls3Input,
+    const void* ps1Input, const void* ps2Input, const void* ps3Input,
+    void* numDetectionsOutput, void* nmsClassesOutput, void* nmsScoresOutput, 
+    void* nmsBoxesOutput, void* nmsKeyPointsOutput, void* workspace, cudaStream_t stream
 );
 
 nvinfer1::PluginFieldCollection YOLOv8PoseLayerPluginCreator::mFC{};
@@ -34,36 +31,15 @@ std::vector<nvinfer1::PluginField> YOLOv8PoseLayerPluginCreator::mPluginAttribut
 
 YOLOv8PoseLayer::YOLOv8PoseLayer(void const *data, size_t length) {
     const char *d = static_cast<const char *>(data);
-
-    read(d, m_maxStride);
-    read(d, m_numClasses);
-    read(d, m_keyPoints);
-    read(d, m_netWidth);
-    read(d, m_netHeight);
-    read(d, m_totalAnchors);
-    read(d, m_OutputSize);
-    read(d, m_socreThreshold);
-    read(d, m_nmsThreshold);
-
-    m_mapSize.resize(NHEADNUM);
-    for (uint i = 0; i < m_mapSize.size(); i++) {
-        read(d, m_mapSize[i]);
-    }
-
-    m_headStarts.resize(NHEADNUM);
-    for (uint i = 0; i < m_headStarts.size(); i++) {
-        read(d, m_headStarts[i]);
-    }
+    read(d, mParam);
 }
 
-YOLOv8PoseLayer::YOLOv8PoseLayer(const uint &max_stride, const float &socre_threshold, const float &nms_threshold)
-    : m_maxStride(max_stride), m_socreThreshold(socre_threshold), m_nmsThreshold(nms_threshold) {};
-
+YOLOv8PoseLayer::YOLOv8PoseLayer(YOLOv8PoseLayerParameters params) {};
 
 nvinfer1::IPluginV2DynamicExt* YOLOv8PoseLayer::clone() const noexcept {
     nvinfer1::IPluginV2DynamicExt* plugin_layer{nullptr};
     try {
-        plugin_layer = new YOLOv8PoseLayer(m_maxStride, m_socreThreshold, m_nmsThreshold);
+        plugin_layer = new YOLOv8PoseLayer(mParam);
     }
     catch(const std::exception& e) {
         std::cerr << e.what() << '\n';
@@ -78,44 +54,33 @@ nvinfer1::DimsExprs YOLOv8PoseLayer::getOutputDimensions(
     assert(outputIndex < 5);
 
     nvinfer1::DimsExprs out_dim;
-    const nvinfer1::IDimensionExpr* batch_size = inputs[0].d[0];
-
-    const nvinfer1::IDimensionExpr* output_num_boxes = exprBuilder.constant(0);
-
-    for (int32_t i = 0; i < NHEADNUM; i++) {
-        output_num_boxes = exprBuilder.operation(
-            nvinfer1::DimensionOperation::kSUM, 
-            *output_num_boxes,
-            *inputs[i * 2].d[3]
-        );
-    }
 
     if (outputIndex == 0) { // NumDetections [batch_size, 1]
         out_dim.nbDims = 2;
-        out_dim.d[0] = batch_size;
+        out_dim.d[0] = inputs[0].d[0];
         out_dim.d[1] = exprBuilder.constant(1);
     }
     else if (outputIndex == 1) { // DetectionClasses [batch_size, numboxes]
         out_dim.nbDims = 2;
-        out_dim.d[0] = batch_size;
-        out_dim.d[1] = output_num_boxes;
+        out_dim.d[0] = inputs[0].d[0];
+        out_dim.d[1] = exprBuilder.constant(mParam.numOutputBoxes);
     }
     else if (outputIndex == 2) { // DetectionScores [batch_size, numboxes]
         out_dim.nbDims = 2;
-        out_dim.d[0] = batch_size;
-        out_dim.d[1] = output_num_boxes;
+        out_dim.d[0] = inputs[0].d[0];
+        out_dim.d[1] = exprBuilder.constant(mParam.numOutputBoxes);
     }
     else if (outputIndex == 3) { // DetectionBoxes [batch_size, numboxes, 4]
         out_dim.nbDims = 3;
-        out_dim.d[0] = batch_size;
-        out_dim.d[1] = output_num_boxes;
+        out_dim.d[0] = inputs[0].d[0];
+        out_dim.d[1] = exprBuilder.constant(mParam.numOutputBoxes);
         out_dim.d[2] = exprBuilder.constant(4);
     }
     else { // DetectionKeyPoints [batch_size, numboxes, 3]
         out_dim.nbDims = 3;
-        out_dim.d[0] = batch_size;
-        out_dim.d[1] = output_num_boxes;
-        out_dim.d[2] = exprBuilder.constant(3);
+        out_dim.d[0] = inputs[0].d[0];
+        out_dim.d[1] = exprBuilder.constant(mParam.numOutputBoxes);
+        out_dim.d[2] = exprBuilder.constant(3 * mParam.numKeypoints);
     }
     return out_dim;
 }
@@ -131,70 +96,48 @@ nvinfer1::DataType YOLOv8PoseLayer::getOutputDataType(
 }
 
 size_t YOLOv8PoseLayer::getSerializationSize() const noexcept {
-    size_t totalSize = 0;
-
-    totalSize += sizeof(m_maxStride);
-    totalSize += sizeof(m_numClasses);
-    totalSize += sizeof(m_keyPoints);
-    totalSize += sizeof(m_netWidth);
-    totalSize += sizeof(m_netHeight);
-    totalSize += sizeof(m_totalAnchors);
-    totalSize += sizeof(m_OutputSize);
-    totalSize += sizeof(m_socreThreshold);
-    totalSize += sizeof(m_nmsThreshold);
-
-    totalSize += m_mapSize.size() * sizeof(m_mapSize[0]);
-    totalSize += m_headStarts.size() * sizeof(m_headStarts[0]);
-
-    return totalSize;
+    return sizeof(YOLOv8PoseLayerParameters);
 }
 
 void YOLOv8PoseLayer::serialize(void* buffer) const noexcept {
     char *d = static_cast<char *>(buffer);
 
-    write(d, m_maxStride);
-    write(d, m_numClasses);
-    write(d, m_keyPoints);
-    write(d, m_netWidth);
-    write(d, m_netHeight);
-    write(d, m_totalAnchors);
-    write(d, m_OutputSize);
-    write(d, m_socreThreshold);
-    write(d, m_nmsThreshold);
-
-    // write m_mapSize:
-    for (int i = 0; i < m_mapSize.size(); i++) {
-        write(d, m_mapSize[i]);
-    }
-
-    // write m_headStarts:
-    for (int i = 0; i < m_headStarts.size(); i++) {
-        write(d, m_headStarts[i]);
-    }
+    write(d, mParam);
 }
 
 void YOLOv8PoseLayer::configurePlugin(
     nvinfer1::DynamicPluginTensorDesc const* in, int32_t nbInput, 
     nvinfer1::DynamicPluginTensorDesc const* out, int32_t nbOutput
 ) noexcept {
-    assert(nbInput == NBINPUTS);
+    assert(nbInput == 9);
 
-    m_totalAnchors = 0;
-    m_mapSize.clear();
-    m_headStarts.clear();
-    m_numClasses = 0;
-    m_keyPoints = 0;
-    for (int i = 0; i < NHEADNUM; i++) {
-        m_headStarts.push_back(m_totalAnchors);
-        m_totalAnchors += in[i * 2].desc.dims.d[2] * in[i * 2].desc.dims.d[3];
-        m_mapSize.push_back(in[i * 2 + 1].desc.dims.d[2]);
+    mParam.numClasses = in[1].desc.dims.d[1];
+    mParam.numKeypoints = static_cast<int>(in[6].desc.dims.d[1] / 3);
+    mParam.inputWidth = in[1].desc.dims.d[3] * mParam.minStride;
+    mParam.inputHeight = in[1].desc.dims.d[2] * mParam.minStride;
+
+    for (size_t i = 0; i < 3; i++) {
+        assert(in[i * 2].desc.dims.nbDims == 4);
+        mParam.numAnchors += in[i * 2].desc.dims.d[3];
+        if (i == 0)
+            mParam.headStart = mParam.numAnchors;
+        else if (i == 1)
+            mParam.headEnd = mParam.numAnchors;
     }
 
-    m_netWidth = m_mapSize[0] * m_maxStride;
-    m_netHeight = m_mapSize[0] * m_maxStride;
+    for (size_t i = 0; i < 4; i++) {
+        mParam.reg1Size = in[0].desc.dims.d[1] * in[0].desc.dims.d[2] * in[0].desc.dims.d[3];
+        mParam.reg2Size = in[2].desc.dims.d[1] * in[2].desc.dims.d[2] * in[2].desc.dims.d[3];
+        mParam.reg3Size = in[4].desc.dims.d[1] * in[4].desc.dims.d[2] * in[4].desc.dims.d[3];
 
-    m_numClasses = in[1].desc.dims.d[1];
-    m_keyPoints = static_cast<int>(in[6].desc.dims.d[1] / 3);
+        mParam.cls1Size = in[1].desc.dims.d[1] * in[1].desc.dims.d[2] * in[1].desc.dims.d[3];
+        mParam.cls2Size = in[3].desc.dims.d[1] * in[3].desc.dims.d[2] * in[3].desc.dims.d[3];
+        mParam.cls3Size = in[5].desc.dims.d[1] * in[5].desc.dims.d[2] * in[5].desc.dims.d[3];
+
+        mParam.ps1Size = in[6].desc.dims.d[1] * in[6].desc.dims.d[2] * in[6].desc.dims.d[3];
+        mParam.ps2Size = in[7].desc.dims.d[1] * in[7].desc.dims.d[2] * in[7].desc.dims.d[3];
+        mParam.ps3Size = in[8].desc.dims.d[1] * in[8].desc.dims.d[2] * in[8].desc.dims.d[3];
+    }
 }
 
 bool YOLOv8PoseLayer::supportsFormatCombination(
@@ -214,53 +157,72 @@ bool YOLOv8PoseLayer::supportsFormatCombination(
     return (inOut[pos].type == nvinfer1::DataType::kFLOAT) && (inOut[0].type == inOut[pos].type);
 }
 
+size_t YOLOv8PoseLayerWorkspaceSize(int batchSize, int numAnchors) {
+
+    size_t size_rects = (4 + 1) * sizeof(int) * batchSize * numAnchors;
+    size_t size_socres = sizeof(float) * batchSize * numAnchors;
+    size_t size_object_count = sizeof(int) * batchSize;
+    size_t size_keep = sizeof(int) * batchSize * numAnchors;
+
+    return size_rects + size_socres + size_object_count + size_keep;
+}
+
+size_t YOLOv8PoseLayer::getWorkspaceSize(
+    nvinfer1::PluginTensorDesc const* inputs, int32_t nbInputs, 
+    nvinfer1::PluginTensorDesc const* outputs, int32_t nbOutputs
+) const noexcept {
+    int batchSize = inputs[1].dims.d[0];
+    int stride_1_anchors = inputs[0].dims.d[3];
+    int stride_2_anchors = inputs[2].dims.d[3];
+    int stride_3_anchors = inputs[4].dims.d[3];
+    int numAnchors = stride_1_anchors + stride_2_anchors + stride_3_anchors;
+    return YOLOv8PoseLayerWorkspaceSize(batchSize, numAnchors);
+}
+
 int32_t YOLOv8PoseLayer::enqueue(
     nvinfer1::PluginTensorDesc const* inputDesc, nvinfer1::PluginTensorDesc const* outputDesc,
     void const* const* inputs, void* const* outputs, void* workspace, cudaStream_t stream
 ) noexcept {
-    const int batchSize = inputDesc[0].dims.d[0];
+    try {
+        mParam.batchSize = inputDesc[0].dims.d[0];
 
-    int* num_detections        = (int *)outputs[0];
-    int* detection_classes     = (int *)outputs[1];
-    float* detection_scores    = (float *)outputs[2];
-    float* detection_boxes     = (float *)outputs[3];
-    float* detection_keypoints = (float *)outputs[4];
+        const void* const reg1Input = inputs[0];
+        const void* const cls1Input = inputs[1];
+        const void* const reg2Input = inputs[2];
+        const void* const cls2Input = inputs[3];
+        const void* const reg3Input = inputs[4];
+        const void* const cls3Input = inputs[5];
+        const void* const ps1Input  = inputs[6];
+        const void* const ps2Input  = inputs[7];
+        const void* const ps3Input  = inputs[8];
 
-    checkCudaRuntime(cudaMemsetAsync(num_detections, 0, sizeof(int) * batchSize, stream));
-    checkCudaRuntime(cudaMemsetAsync(detection_classes, 0, sizeof(int) * batchSize * m_totalAnchors, stream));
-    checkCudaRuntime(cudaMemsetAsync(detection_scores, 0, sizeof(float) * batchSize * m_totalAnchors, stream));
-    checkCudaRuntime(cudaMemsetAsync(detection_boxes, 0, sizeof(float) * batchSize * m_totalAnchors * 4, stream));
-    checkCudaRuntime(cudaMemsetAsync(detection_keypoints, 0, sizeof(float) * batchSize * m_totalAnchors * 3, stream));
-
-    int* d_mapSize;
-    int* d_headStarts;
-    checkCudaRuntime(cudaMalloc(&d_mapSize, m_mapSize.size() * sizeof(int)));
-    checkCudaRuntime(cudaMalloc(&d_headStarts, m_headStarts.size() * sizeof(int)));
-    checkCudaRuntime(cudaMemcpy(d_mapSize, m_mapSize.data(), m_mapSize.size() * sizeof(int), cudaMemcpyHostToDevice));
-    checkCudaRuntime(cudaMemcpy(d_headStarts, m_headStarts.data(), m_headStarts.size() * sizeof(int), cudaMemcpyHostToDevice));
-
-
-    uint64_t inputSize = m_totalAnchors * (4 + m_numClasses + 2 + m_keyPoints * 3);
-
-    checkCudaRuntime(
-        yolov8PoseLayerInfernece(
-            (float*)inputs, num_detections, detection_classes, detection_scores, detection_boxes, detection_keypoints,
-            batchSize, inputSize, m_maxStride, m_numClasses, m_keyPoints, m_totalAnchors, d_mapSize, d_headStarts, 
-            m_socreThreshold, m_nmsThreshold, stream
-        )
-    );
-
-    checkCudaRuntime(cudaFree(d_headStarts));
-    checkCudaRuntime(cudaFree(d_mapSize));
-
-    return 0;
+        void* numDetectionsOutput      = outputs[0];
+        void* nmsClassesOutput   = outputs[1];
+        void* nmsScoresOutput    = outputs[2];
+        void* nmsBoxesOutput     = outputs[3];
+        void* nmsKeyPointsOutput = outputs[4];
+        
+        return YOLOv8PoseLayerInference(
+            mParam,
+            reg1Input, reg2Input, reg3Input,
+            cls1Input, cls2Input, cls3Input,
+            ps1Input, ps2Input, ps3Input,
+            numDetectionsOutput, nmsClassesOutput, nmsScoresOutput, 
+            nmsBoxesOutput, nmsKeyPointsOutput, workspace, stream
+        );
+    }
+    catch(const std::exception& e) {
+        std::cerr << e.what() << '\n';
+    }
+    return -1;
 }
 
 YOLOv8PoseLayerPluginCreator::YOLOv8PoseLayerPluginCreator() noexcept {
-    mPluginAttributes.emplace_back(nvinfer1::PluginField("max_stride", nullptr, nvinfer1::PluginFieldType::kINT32, NHEADNUM));
+    mPluginAttributes.clear();
+    mPluginAttributes.emplace_back(nvinfer1::PluginField("max_output_boxes", nullptr, nvinfer1::PluginFieldType::kINT32, 1));
+    mPluginAttributes.emplace_back(nvinfer1::PluginField("min_stride", nullptr, nvinfer1::PluginFieldType::kINT32, 1));
     mPluginAttributes.emplace_back(nvinfer1::PluginField("socre_threshold", nullptr, nvinfer1::PluginFieldType::kFLOAT32, 1));
     mPluginAttributes.emplace_back(nvinfer1::PluginField("nms_threshold", nullptr, nvinfer1::PluginFieldType::kFLOAT32, 1));
-
     mFC.nbFields = mPluginAttributes.size();
     mFC.fields = mPluginAttributes.data();
 }
@@ -268,31 +230,33 @@ YOLOv8PoseLayerPluginCreator::YOLOv8PoseLayerPluginCreator() noexcept {
 nvinfer1::IPluginV2DynamicExt* YOLOv8PoseLayerPluginCreator::createPlugin(
     const char* name, const nvinfer1::PluginFieldCollection* fc
 ) noexcept {
-    const nvinfer1::PluginField *fields = fc->fields;
-
-    int max_stride = 0;
-    float socre_threshold = 0.0f;
-    float nms_threshold = 0.0f;
-    
-    for (int i = 0; i < fc->nbFields; i++) {
-        const char* attrName = fields[i].name;
-        if (!strcmp(attrName, "max_stride")) {
-            assert(fields[i].type == nvinfer1::PluginFieldType::kINT32);
-            max_stride = *(static_cast<const int *>(fields[i].data));
-        }
-        if (!strcmp(attrName, "socre_threshold")) {
-            assert(fields[i].type == nvinfer1::PluginFieldType::kFLOAT32);
-            socre_threshold = *(static_cast<const float *>(fields[i].data));
-        }
-        if (!strcmp(attrName, "nms_threshold")) {
-            assert(fields[i].type == nvinfer1::PluginFieldType::kFLOAT32);
-            nms_threshold = *(static_cast<const float *>(fields[i].data));
-        }
-    }
 
     nvinfer1::IPluginV2DynamicExt* plugin_layer{nullptr};
+
     try {
-        plugin_layer = new YOLOv8PoseLayer(max_stride, socre_threshold, nms_threshold);
+        const nvinfer1::PluginField* fields = fc->fields;
+
+        for (int i = 0; i < fc->nbFields; i++) {
+            const char* attrName = fields[i].name;
+            if (!strcmp(attrName, "max_output_boxes")) {
+                assert(fields[i].type == nvinfer1::PluginFieldType::kINT32);
+                mParam.numOutputBoxes = *(static_cast<const int *>(fields[i].data));
+            }
+            if (!strcmp(attrName, "min_stride")) {
+                assert(fields[i].type == nvinfer1::PluginFieldType::kINT32);
+                mParam.minStride = *(static_cast<const int *>(fields[i].data));
+            }
+            if (!strcmp(attrName, "socre_threshold")) {
+                assert(fields[i].type == nvinfer1::PluginFieldType::kFLOAT32);
+                mParam.scoreThreshold = *(static_cast<const float *>(fields[i].data));
+            }
+            if (!strcmp(attrName, "nms_threshold")) {
+                assert(fields[i].type == nvinfer1::PluginFieldType::kFLOAT32);
+                mParam.iouThreshold = *(static_cast<const float *>(fields[i].data));
+            }
+        }
+
+        plugin_layer = new YOLOv8PoseLayer(mParam);
     }
     catch(const std::exception& e) {
         std::cerr << e.what() << '\n';
