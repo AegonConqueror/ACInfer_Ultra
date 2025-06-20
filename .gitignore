@@ -19,3 +19,4 @@ om/*
 src/demo/*
 engine/*
 *.sh
+python/*

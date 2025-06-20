@@ -309,7 +309,6 @@ void ONNXEngine::GetInferOutput(InferenceData& outputData, bool sync) {
     outputData.reserve(output_num_);
 
     for (auto& elem : outputTensors) {
-
         auto output_shape = elem.GetTensorTypeAndShapeInfo().GetShape();
         std::vector<int> output;
         output.reserve(output_shape.size());
