@@ -88,12 +88,10 @@ namespace YOLO {
         input_attr_    = engine_->GetInputAttrs()[0];
         output_attrs_ = engine_->GetOutputAttrs();
 
-        if (decode_type_ == DecodeMethod::CPU) {
-            model_class_num_ = output_attrs_[engine_->GetOutputIndex("cls1")].dims[1];
+        model_class_num_ = output_attrs_[engine_->GetOutputIndex("cls1")].dims[1];
 
-            if (task_type_ == Task::YOLO_POSE) {
-                model_keypoints_num_ = static_cast<int>(output_attrs_[engine_->GetOutputIndex("ps1")].dims[1] / 3);
-            }
+        if (task_type_ == Task::YOLO_POSE) {
+            model_keypoints_num_ = static_cast<int>(output_attrs_[engine_->GetOutputIndex("ps1")].dims[1] / 3);
         }
         return SUCCESS;
     }
@@ -196,33 +194,61 @@ namespace YOLO {
 
                     int total_size = std::accumulate(output_size.begin(), output_size.end(), 0);
 
-                    float* h_output_data = (float *)malloc(total_size * sizeof(float));
+                    float* output_data = (float *)malloc(total_size * sizeof(float));
             
                     int pos = 0;
                     for (size_t i = 0; i < output_num; ++i) {
                         float* src = (float *)infer_output_data[engine_->GetOutputIndex(pose_names[i])].first;
                         size_t offset = output_size[i];
 
-                        memcpy(h_output_data, src, offset * sizeof(float));
+                        memcpy(output_data + pos, src, offset * sizeof(float));
                         pos += offset;
                     }
 
                     int keepTopK = 20;
             
                     int num_dets[1];
-                    int det_classes[1 * keepTopK]; 
-                    float det_scores[1 * keepTopK]; 
-                    float det_boxes[1 * keepTopK];
-                    float det_keypoints[1 * keepTopK * 3 * model_keypoints_num_ ];
+                    int det_classes[keepTopK]; 
+                    float det_scores[keepTopK]; 
+                    float det_boxes[keepTopK * 4];
+                    float det_keypoints[keepTopK * 3 * model_keypoints_num_];
 
                     yolov8_pose_decode_gpu(
-                        h_output_data, output_size.data(), output_num, 
+                        output_data, output_size.data(), output_num, 
                         num_dets, det_classes, det_scores, det_boxes, det_keypoints,
                         input_w, input_h, image_w, image_h, model_class_num_,
-                        0.45, 0.45, model_keypoints_num_
+                        0.25, 0.45, model_keypoints_num_
                     );
 
-                    LOG_INFO(">>> num_dets[1] %d", num_dets[1]);
+                    for (int i = 0; i < num_dets[0]; i++) {
+                        yolo_result dr;
+
+                        int classId = det_classes[i];
+                        float conf = det_scores[i];
+                        
+                        int xmin = int(det_boxes[i * 4 + 0]);
+                        int ymin = int(det_boxes[i * 4 + 1]);
+                        int xmax = int(det_boxes[i * 4 + 2]);
+                        int ymax = int(det_boxes[i * 4 + 3]);
+
+                        std::map<int, KeyPoint> kp_map;
+                        for (int k = 0; k < model_keypoints_num_; k++) {
+                            KeyPoint kp;
+                            kp.x = det_keypoints[k * model_keypoints_num_ * 3 + i * 3 + 0];
+                            kp.y = det_keypoints[k * model_keypoints_num_ * 3 + i * 3 + 1];
+                            kp.score = det_keypoints[k * model_keypoints_num_ * 3 + i * 3 + 2];
+                            kp.id = k;
+                            kp_map[k] = kp;
+                        }
+
+                        dr.classId = classId;
+                        dr.score = conf;
+                        dr.box = Box{xmin, ymin, xmax, ymax};// cv::Rect(xmin, ymin, xmax - xmin, ymax - ymin);
+                        dr.keypoints = kp_map;
+
+                        resluts.push_back(dr);
+                    }
+
                 }
             }
         }
@@ -252,7 +278,7 @@ namespace YOLO {
         InferenceData infer_output_data;
         ret = inference(infer_output_data);
         if (ret != SUCCESS){
-            LOG_ERROR("yolov8 inference fail ...");
+            LOG_ERROR("yolo inference fail ...");
             return ret;
         }
 
@@ -261,7 +287,7 @@ namespace YOLO {
 
         ret = postprocess(letterbox_frame, infer_output_data, resluts);
         if (ret != SUCCESS){
-            LOG_ERROR("yolov8 postprocess fail ...");
+            LOG_ERROR("yolo postprocess fail ...");
             return ret;
         }
 
