@@ -26,12 +26,10 @@ namespace yolov8 {
 
     static int headNum = 3;
     static int strides[3] = {8, 16, 32};
-    // static int mapSize[3][2] = {{80, 80}, {40, 40}, {20, 20}};
 
     int maskNum = 32;
     int mask_seg_w = 160;
     int mask_seg_h = 160;
-    // int keypoint_num = 17;
 
     static inline float fast_exp(float x) {
         union
@@ -97,8 +95,7 @@ namespace yolov8 {
     }
 
     void PostprocessSplit_POSE(
-        float **preds, std::vector<float> &pose_rects,
-        std::vector<std::map<int, KeyPoint>> &key_points,
+        float **preds, std::vector<float>& pose_rects, KeyPointsArray& key_points,
         int input_w, int input_h, int class_num, int keypoint_num,
         float conf_thres, float nms_thres
     ) {

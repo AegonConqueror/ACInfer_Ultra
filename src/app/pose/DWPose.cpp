@@ -60,15 +60,13 @@ namespace DWPose {
     }
 
     error_e ModelImpl::Run(const cv::Mat& frame, std::vector<yolov8_result>& results) {
-        
         cv::Mat input_image = frame.clone();  // 复制原图
         int original_height = input_image.rows;
         int original_width = input_image.cols;
 
-        input_image = resize_image(input_image, 640);
+        input_image = resize_image(input_image, 720);
         int height = input_image.rows;
         int width = input_image.cols;
-
 
         detector_->Run(input_image, results);
         LOG_INFO("detector results %d", results.size());

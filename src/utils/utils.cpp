@@ -65,6 +65,10 @@ namespace iLog {
         n += snprintf(buffer + n, sizeof(buffer) - n, "[%s:%d]:", filename.c_str(), line);
         vsnprintf(buffer + n, sizeof(buffer) - n, fmt, vl);
         fprintf(stdout, "%s\n", buffer);
+
+        if (level == LogLevel::Fatal or level == LogLevel::Error) {
+            abort();
+        }
     }
 
 } // namespace iLog

@@ -23,6 +23,7 @@ float iou_gpu(
     float area2 = (xmax_B - xmin_B) * (ymax_B - ymin_B);
     return inter / (area1 + area2 - inter);
 }
+
 __global__
 void YOLOv8PoseLayerNMS(
     YOLOv8PoseLayerParameters param,
@@ -159,8 +160,7 @@ void YOLOv8PoseLayerNMS(
 }
 
 template <typename T>
-T* YOLOv8PoseLayerWorkspace(void* workspace, size_t& offset, size_t elements)
-{
+T* YOLOv8PoseLayerWorkspace(void* workspace, size_t& offset, size_t elements) {
     T* buffer = (T*) ((size_t) workspace + offset);
     size_t size = elements * sizeof(T);
     offset += size;

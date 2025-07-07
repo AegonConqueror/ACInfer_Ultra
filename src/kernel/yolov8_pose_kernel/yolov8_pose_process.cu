@@ -2,7 +2,7 @@
 
 #include "trt/trt_cuda.h"
 
-#include "yolo/yolov8_type.h"
+#include "yolo/yolo_type.h"
 
 __device__ 
 float sigmoid_gpu(float x) {
@@ -62,10 +62,6 @@ void yolov8_pose_decode_kernel(
     float* reg = pBlob + pBlob_offset[head_idx * 2 + 0] + imageIdx * total_size;
     float* cls = pBlob + pBlob_offset[head_idx * 2 + 1] + imageIdx * total_size;
     float* ps  = pBlob + pBlob_offset[head_idx + headNum * 2] + imageIdx * total_size;
-
-    // if (tid == 1000) {
-    //     printf("reg %d, %f -- %f\n", total_anchors, pBlob[1000], pBlob[1000 + imageIdx * total_size]);
-    // }
     
     float cx = float(col + 0.5);
     float cy = float(row + 0.5);
@@ -190,11 +186,9 @@ void yolov8_pose_decode_gpu(
         total_size += output_size[i];
     }
 
-    int batchSize = 2;
-
     float* d_output_data = nullptr;
-    checkCudaRuntime(cudaMalloc(&d_output_data, total_size * sizeof(float) * batchSize));
-    checkCudaRuntime(cudaMemcpy(d_output_data, output_data, total_size * sizeof(float) * batchSize, cudaMemcpyHostToDevice));
+    checkCudaRuntime(cudaMalloc(&d_output_data, total_size * sizeof(float)));
+    checkCudaRuntime(cudaMemcpy(d_output_data, output_data, total_size * sizeof(float), cudaMemcpyHostToDevice));
     
     int* d_pBlob_offset = nullptr;
     checkCudaRuntime(cudaMalloc(&d_pBlob_offset, output_num * sizeof(int)));
@@ -204,14 +198,14 @@ void yolov8_pose_decode_gpu(
     float* d_output_scores;
     int* d_objectCount;
     int* d_keep;
-    checkCudaRuntime(cudaMalloc(&d_output_rects, (4 + 1) * sizeof(int) * total_anchors * batchSize));
-    checkCudaRuntime(cudaMemset(d_output_rects, 0, (4 + 1) * sizeof(int) * total_anchors * batchSize));
-    checkCudaRuntime(cudaMalloc(&d_output_scores, sizeof(float) * total_anchors * batchSize));
-    checkCudaRuntime(cudaMemset(d_output_scores, 0, sizeof(float) * total_anchors * batchSize));
-    checkCudaRuntime(cudaMalloc(&d_objectCount, sizeof(int) * batchSize));
-    checkCudaRuntime(cudaMemset(d_objectCount, 0, sizeof(int) * batchSize));
-    checkCudaRuntime(cudaMalloc(&d_keep, sizeof(int) * total_anchors * batchSize));
-    checkCudaRuntime(cudaMemset(d_keep, -1, sizeof(int) * total_anchors * batchSize));
+    checkCudaRuntime(cudaMalloc(&d_output_rects, (4 + 1) * sizeof(int) * total_anchors));
+    checkCudaRuntime(cudaMemset(d_output_rects, 0, (4 + 1) * sizeof(int) * total_anchors));
+    checkCudaRuntime(cudaMalloc(&d_output_scores, sizeof(float) * total_anchors));
+    checkCudaRuntime(cudaMemset(d_output_scores, 0, sizeof(float) * total_anchors));
+    checkCudaRuntime(cudaMalloc(&d_objectCount, sizeof(int)));
+    checkCudaRuntime(cudaMemset(d_objectCount, 0, sizeof(int)));
+    checkCudaRuntime(cudaMalloc(&d_keep, sizeof(int) * total_anchors));
+    checkCudaRuntime(cudaMemset(d_keep, -1, sizeof(int) * total_anchors));
 
     int keepTopK = 20;
 
@@ -221,22 +215,22 @@ void yolov8_pose_decode_gpu(
     float* detection_boxes;
     float* detection_keypoints;
 
-    checkCudaRuntime(cudaMalloc(&num_detections, sizeof(int) * batchSize));
-    checkCudaRuntime(cudaMalloc(&detection_classes, sizeof(int) * keepTopK * batchSize));
-    checkCudaRuntime(cudaMalloc(&detection_scores, sizeof(float) * keepTopK * batchSize));
-    checkCudaRuntime(cudaMalloc(&detection_boxes, sizeof(float) * keepTopK * 4 * batchSize));
-    checkCudaRuntime(cudaMalloc(&detection_keypoints, sizeof(float) * keepTopK * 3 * keypoint_num * batchSize));
+    checkCudaRuntime(cudaMalloc(&num_detections, sizeof(int)));
+    checkCudaRuntime(cudaMalloc(&detection_classes, sizeof(int) * keepTopK));
+    checkCudaRuntime(cudaMalloc(&detection_scores, sizeof(float) * keepTopK));
+    checkCudaRuntime(cudaMalloc(&detection_boxes, sizeof(float) * keepTopK * 4));
+    checkCudaRuntime(cudaMalloc(&detection_keypoints, sizeof(float) * keepTopK * 3 * keypoint_num));
 
-    checkCudaRuntime(cudaMemset(num_detections, 0, sizeof(int) * batchSize));
-    checkCudaRuntime(cudaMemset(detection_classes, 0, sizeof(int) * keepTopK * batchSize));
-    checkCudaRuntime(cudaMemset(detection_scores, 0, sizeof(float) * keepTopK * batchSize));
-    checkCudaRuntime(cudaMemset(detection_boxes, 0, sizeof(float) * keepTopK * 4 * batchSize));
-    checkCudaRuntime(cudaMemset(detection_keypoints, 0, sizeof(float) * keepTopK * 3 * keypoint_num * batchSize));
+    checkCudaRuntime(cudaMemset(num_detections, 0, sizeof(int)));
+    checkCudaRuntime(cudaMemset(detection_classes, 0, sizeof(int) * keepTopK));
+    checkCudaRuntime(cudaMemset(detection_scores, 0, sizeof(float) * keepTopK));
+    checkCudaRuntime(cudaMemset(detection_boxes, 0, sizeof(float) * keepTopK * 4));
+    checkCudaRuntime(cudaMemset(detection_keypoints, 0, sizeof(float) * keepTopK * 3 * keypoint_num));
 
     int threadSize = 256;
 
     dim3 block(threadSize, 1);
-    dim3 grid(batchSize, (total_anchors + threadSize - 1) / threadSize);
+    dim3 grid(1, (total_anchors + threadSize - 1) / threadSize);
 
     checkCudaKernel(
         yolov8_pose_decode_kernel<<<grid, block>>>(
@@ -247,11 +241,11 @@ void yolov8_pose_decode_gpu(
         );
     );
     
-    checkCudaRuntime(cudaMemcpy(num_dets, num_detections, sizeof(int) * batchSize, cudaMemcpyDeviceToHost));
-    checkCudaRuntime(cudaMemcpy(det_classes, detection_classes, sizeof(int) * keepTopK * batchSize, cudaMemcpyDeviceToHost));
-    checkCudaRuntime(cudaMemcpy(det_scores, detection_scores, sizeof(float) * keepTopK * batchSize, cudaMemcpyDeviceToHost));
-    checkCudaRuntime(cudaMemcpy(det_boxes, detection_boxes, sizeof(float) * keepTopK * 4 * batchSize, cudaMemcpyDeviceToHost));
-    checkCudaRuntime(cudaMemcpy(det_keypoints, detection_keypoints, sizeof(float) * keepTopK * 3 * keypoint_num * batchSize, cudaMemcpyDeviceToHost));
+    checkCudaRuntime(cudaMemcpy(num_dets, num_detections, sizeof(int), cudaMemcpyDeviceToHost));
+    checkCudaRuntime(cudaMemcpy(det_classes, detection_classes, sizeof(int) * keepTopK, cudaMemcpyDeviceToHost));
+    checkCudaRuntime(cudaMemcpy(det_scores, detection_scores, sizeof(float) * keepTopK, cudaMemcpyDeviceToHost));
+    checkCudaRuntime(cudaMemcpy(det_boxes, detection_boxes, sizeof(float) * keepTopK * 4, cudaMemcpyDeviceToHost));
+    checkCudaRuntime(cudaMemcpy(det_keypoints, detection_keypoints, sizeof(float) * keepTopK * 3 * keypoint_num, cudaMemcpyDeviceToHost));
 
     checkCudaRuntime(cudaFree(detection_keypoints));
     checkCudaRuntime(cudaFree(detection_boxes));

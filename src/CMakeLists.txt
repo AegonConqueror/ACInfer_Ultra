@@ -14,7 +14,6 @@ if(USE_ATALS)
 endif(USE_ATALS)
 
 if(USE_TENSORRT)
-
     add_subdirectory(plugin)
 
     include_directories(${TensorRT_INCLUDE_DIR})
@@ -37,7 +36,7 @@ if(USE_TENSORRT)
         ${CMAKE_CURRENT_SOURCE_DIR}/engine/builder/trt_builder.cpp
     )
     target_link_libraries(build_trt_engine PRIVATE tensorrt_utils)
-    target_link_libraries(build_trt_engine PRIVATE -Wl,--no-as-needed customLayerPlugin)
+    # target_link_libraries(build_trt_engine PRIVATE -Wl,--no-as-needed customLayerPlugin)
     # target_link_libraries(build_trt_engine PRIVATE -Wl,--no-as-needed customLayerPlugin yolov8PoseLayerPlugin)
     set_target_properties(build_trt_engine PROPERTIES CUDA_ARCHITECTURES "61;70;75")
 
@@ -61,61 +60,50 @@ endif()
 
 if(USE_ONNXRUNTIME)
     add_library(
-        yolov8_inference
+        yolo_inference
         SHARED
-        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolov8.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolo.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/preprocess.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/yolov8_postprocess.cpp
     )
-    target_link_libraries(yolov8_inference PUBLIC inference_engine)
-endif()
+    target_link_libraries(yolo_inference PUBLIC inference_engine)
 
-if(USE_ONNXRUNTIME)
     add_executable(
-        dwpose_test_onnx
-        ${CMAKE_CURRENT_SOURCE_DIR}/demo/dwpose_test_onnx.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/app/pose/DWPose.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/app/pose/pose.cpp
+        yolo_test_onnx
+        ${CMAKE_CURRENT_SOURCE_DIR}/demo/yolo_test_onnx.cpp
     )
-    target_link_libraries(dwpose_test_onnx PRIVATE yolov8_inference)
+    target_link_libraries(yolo_test_onnx PRIVATE yolo_inference)
 endif()
 
-# if(USE_TENSORRT)
-#     add_executable(
-#         yolov8_test_trt
-#         ${CMAKE_CURRENT_SOURCE_DIR}/demo/yolov8_test_trt.cpp
-#         ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolov8.cpp
-#         ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/preprocess.cpp
-#         ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/yolov8_postprocess.cpp
-#         ${CMAKE_CURRENT_SOURCE_DIR}/kernel/yolov8_pose_kernel/yolov8_pose_process.cu
-#     )
-#     target_link_libraries(yolov8_test_trt PRIVATE inference_engine)
-#     target_link_libraries(yolov8_test_trt PRIVATE tensorrt_utils)
-#     target_link_libraries(yolov8_test_trt PRIVATE -Wl,--no-as-needed customLayerPlugin)
-#     set_target_properties(yolov8_test_trt PROPERTIES CUDA_ARCHITECTURES "61;70;75")
 
-#     add_executable(
-#         plugin_demo
-#         ${CMAKE_CURRENT_SOURCE_DIR}/demo/plugin_demo.cpp
-#     )
-#     target_link_libraries(plugin_demo PRIVATE inference_engine)
-#     target_link_libraries(plugin_demo PRIVATE -Wl,--no-as-needed customLayerPlugin)
-#     set_target_properties(plugin_demo PROPERTIES CUDA_ARCHITECTURES "61;70;75")
-# endif(USE_TENSORRT)
+if(USE_TENSORRT)
+
+    add_library(
+        yolo_inference
+        SHARED
+        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolo.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/preprocess.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/yolov8_postprocess.cpp
+    )
+    target_link_libraries(yolo_inference PUBLIC inference_engine)
 
 
+    add_executable(
+        yolo_test_trt
+        ${CMAKE_CURRENT_SOURCE_DIR}/demo/yolo_test_trt.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/yolo.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/preprocess.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/app/yolo/process/yolov8_postprocess.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/kernel/yolov8_pose_kernel/yolov8_pose_process.cu
+    )
+    target_link_libraries(yolo_test_trt PRIVATE yolo_inference)
+    set_target_properties(yolo_test_trt PROPERTIES CUDA_ARCHITECTURES "61;70;75")
 
-# find_package(Eigen3 3.3 REQUIRED NO_MODULE)
-
-# file(GLOB_RECURSE DEEPSORT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/app/tracker/botsort/*.cpp)
-
-# add_executable(
-#     yolov8_video_demo
-#     ${CMAKE_CURRENT_SOURCE_DIR}/demo/yolov8_video_demo.cpp
-#     ${CMAKE_CURRENT_SOURCE_DIR}/app/detect/yolo.cpp
-#     ${CMAKE_CURRENT_SOURCE_DIR}/app/detect/yolo_postprocess/postprocess.cpp
-#     ${CMAKE_CURRENT_SOURCE_DIR}/app/feature/ReID.cpp
-#     ${CMAKE_CURRENT_SOURCE_DIR}/app/tracker/deepsort/deepsort.cpp
-
-# )
-# target_link_libraries(yolov8_video_demo PRIVATE inference_engine Eigen3::Eigen)
+    # add_executable(
+    #     plugin_demo
+    #     ${CMAKE_CURRENT_SOURCE_DIR}/demo/plugin_demo.cpp
+    # )
+    # target_link_libraries(plugin_demo PRIVATE inference_engine)
+    # target_link_libraries(plugin_demo PRIVATE -Wl,--no-as-needed customLayerPlugin)
+    # set_target_properties(plugin_demo PROPERTIES CUDA_ARCHITECTURES "61;70;75")
+endif(USE_TENSORRT)

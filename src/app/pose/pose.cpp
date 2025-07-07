@@ -2,23 +2,20 @@
 
 #include "engine.h"
 
+#include <unordered_set>
+
 void key_points(cv::Mat& img, const std::map<int, KeyPoint>& keypoints) {
-    int index = 0;
     for (const auto& keyP : keypoints) {
-        index++;
-        if (index >= 24 && index <= 90) 
-            cv::circle(img, cv::Point(keyP.second.x, keyP.second.y), 2, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-        else
-            continue;
+        cv::circle(img, cv::Point(keyP.second.x, keyP.second.y), 2, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
     }
 }
-
 typedef struct AffineImg {
     cv::Mat src_img;
-    cv::Mat img;
-    cv::Point2f center;
-    cv::Point2f scale;
+    cv::Mat timg;
+    cv::Rect2f padding_roi;
 } AffineImg;
+
+std::unordered_set<int> choose_index{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 83, 85, 87, 89};
 
 void dw_postprocess(
     const float* simcc_x,
@@ -31,24 +28,14 @@ void dw_postprocess(
     int Wx = 576;
     int Wy = 768;
 
-    int test_max = 0;
-    float max_x = simcc_x[0];
-
-    for (int i = 1; i < K * Wx; ++i) {
-        float v = simcc_x[i];
-        if (v > max_x) {
-            max_x = v;
-            test_max = i;
-        }
-    }
-
-    LOG_INFO("max val %f index %d", max_x, test_max);
-
+    int index = 0;
     for (int n = 0; n < N; n++) {
         for (int k = 0; k < K; k++) {
+            if (!choose_index.count(k))
+                continue;
+            
             int idx = n * K + k;
 
-            // 获取 simcc_x 的最大值及位置
             int max_x_index = 0;
             float max_x_val = simcc_x[idx * Wx];
 
@@ -60,7 +47,6 @@ void dw_postprocess(
                 }
             }
 
-            // 获取 simcc_y 的最大值及位置
             int max_y_index = 0;
             float max_y_val = simcc_y[idx * Wy];
             for (int i = 1; i < Wy; ++i) {
@@ -71,7 +57,6 @@ void dw_postprocess(
                 }
             }
 
-            // 取较小值作为最终置信度
             float confidence = std::min(max_x_val, max_y_val);
             KeyPoint kp;
             kp.score = confidence;
@@ -83,8 +68,9 @@ void dw_postprocess(
                 kp.y = -1.0f / simcc_split_ratio;
             }
 
-            kp.id = k;
-            pose_points.insert({k, kp});
+            kp.id = index;
+            pose_points.insert({index, kp});
+            index++;
         }
     }
 }
@@ -183,41 +169,21 @@ cv::Mat top_down_affine(
     return warped_img;
 }
 
-void process_keypoints(std::map<int, KeyPoint>& keypoints) {
-    // Step 1: 计算 neck = 平均 5 和 6
-    KeyPoint kp5 = keypoints[5];
-    KeyPoint kp6 = keypoints[6];
+void padding_roi_img(
+    const cv::Mat& src_frame, 
+    const cv::Rect& roi, 
+    cv::Mat& roi_img, 
+    cv::Rect2f& padding_roi,
+    float padding = 1.25f
+) {
+    padding_roi.x  = (float)roi.x - roi.width * (padding - 1.0) * 0.5;
+    padding_roi.y  = (float)roi.y - roi.height * (padding - 1.0) * 0.5;
+    padding_roi.width = roi.width * padding;
+    padding_roi.height = roi.height * padding;
 
-    KeyPoint neck;
-    neck.x = (kp5.x + kp6.x) / 2.0f;
-    neck.y = (kp5.y + kp6.y) / 2.0f;
+    padding_roi = padding_roi & cv::Rect2f(0, 0, src_frame.cols, src_frame.rows);
 
-    // neck 的 score 判断
-    bool valid_5 = kp5.score > 0.3f;
-    bool valid_6 = kp6.score > 0.3f;
-    neck.score = (valid_5 && valid_6) ? 1.0f : 0.0f;
-    neck.id = 17;
-
-    // Step 2: 插入为 id = 17
-    keypoints[17] = neck;
-
-    // Step 3: 根据映射关系重排 keypoints 到 new_map
-    std::vector<int> mmpose_idx  = {17, 6, 8, 10, 7, 9, 12, 14, 16, 13, 15, 2, 1, 4, 3};
-    std::vector<int> openpose_idx = {1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17};
-
-    std::map<int, KeyPoint> new_keypoints = keypoints;  // 复制旧 keypoints
-
-    for (size_t i = 0; i < mmpose_idx.size(); ++i) {
-        int src = mmpose_idx[i];
-        int dst = openpose_idx[i];
-        if (keypoints.count(src)) {
-            KeyPoint kp = keypoints[src];
-            kp.id = dst;
-            new_keypoints[dst] = kp;
-        }
-    }
-
-    keypoints = new_keypoints;
+    roi_img = src_frame(padding_roi).clone();   
 }
 
 namespace Pose {
@@ -271,50 +237,28 @@ namespace Pose {
 
             cv::Point2f center;
             cv::Point2f scale;
-            bbox_xyxy2cs(det_results[i].box, center, scale);
+            // bbox_xyxy2cs(det_results[i].box, center, scale);
 
-            cv::Mat resized_img = top_down_affine(input_w, input_h, scale, center, src_frame);
+            cv::Mat resized_img, rgb_img, normalized_img;
 
-            cv::Mat rgb_img, normalized_img;
+            // resized_img = top_down_affine(input_w, input_h, scale, center, src_frame);
+
+            cv::Mat item_img;
+            cv::Rect2f padding_roi;
+            padding_roi_img(src_frame, box, item_img, padding_roi);
+
+            cv::resize(item_img, resized_img, cv::Size(input_w, input_h));
             cv::cvtColor(resized_img, rgb_img, cv::COLOR_BGR2RGB);
-
-            // char save_file[100];
-            // sprintf(save_file, "./output/pose/kkk/item%d.jpg", i);
-            // cv::imwrite(save_file, rgb_img);
-
-            // char open_file[100];
-            // sprintf(open_file, "./python/DWPose/output0%d.jpg", i);
-
-            // rgb_img = cv::imread(open_file);
 
             rgb_img.convertTo(normalized_img, CV_32F);
             cv::Scalar mean(123.675, 116.28, 103.53);
             cv::Scalar std(58.395, 57.12, 57.375);
             normalized_img = (normalized_img - mean) / std;
 
-            // std::cout << "C++ normalized RGB values:\n";
-            // int count = 0;
-            // for (int h = 0; h < normalized_img.rows; ++h) {
-            //     for (int w = 0; w < normalized_img.cols; ++w) {
-            //         if (count >= 10) break;
-            //         cv::Vec3f pixel = normalized_img.at<cv::Vec3f>(h, w);
-            //         std::cout << "Pixel " << count << ": "
-            //                 << "R=" << pixel[0] << ", "
-            //                 << "G=" << pixel[1] << ", "
-            //                 << "B=" << pixel[2] << std::endl;
-            //         count++;
-            //     }
-            //     if (count >= 10) break;
-            // }
-
-            // sprintf(save_file, "./output/pose/kkk/norm_item%d.jpg", i);
-            // cv::imwrite(save_file, normalized_img);
-
             AffineImg affine;
-            affine.src_img = resized_img;
-            affine.img = normalized_img;
-            affine.center = center;
-            affine.scale = scale;
+            affine.src_img = item_img;
+            affine.timg = normalized_img;
+            affine.padding_roi = padding_roi;
             input_imgs.push_back(affine);
         }
 
@@ -353,11 +297,9 @@ namespace Pose {
         dw_postprocess((float *)output_data[0], (float *)output_data[1], pose_points);
 
         for (auto& point : pose_points) {
-            point.second.x = point.second.x / input_w * affine.scale.x + affine.center.x - affine.scale.x / 2.0f;
-            point.second.y = point.second.y / input_h * affine.scale.y + affine.center.y - affine.scale.y / 2.0f;
+            point.second.x *= radio_w;
+            point.second.y *= radio_h;
         }
-
-        // process_keypoints(pose_points);
 
         return SUCCESS;
     }
@@ -369,6 +311,8 @@ namespace Pose {
         int image_h     = frame.rows;
 
         cv::Mat testMat = frame.clone();
+
+        auto time_start = iTime::timestamp_now();
 
         std::vector<AffineImg> input_imgs;
         auto ret = preprocess(frame, det_results, input_imgs);
@@ -384,40 +328,39 @@ namespace Pose {
             int W = input_w;
             int C = 3;
 
-            std::vector<float> input_tensor_values(C * H * W);
+            std::vector<float> input_tensor_values(C * H * W); 
 
             // 将 HWC → CHW
             for (int c = 0; c < C; ++c) {
                 for (int h = 0; h < H; ++h) {
                     for (int w = 0; w < W; ++w) {
                         input_tensor_values[c * H * W + h * W + w] =
-                            input_imgs[i].img.at<cv::Vec3f>(h, w)[c];
+                            input_imgs[i].timg.at<cv::Vec3f>(h, w)[c];
                     }
                 }
             }
             
             infer_input_data.emplace_back(
-                std::make_pair((void *)input_tensor_values.data(), input_imgs[i].img.total() * input_imgs[i].img.elemSize())
+                std::make_pair((void *)input_tensor_values.data(), input_imgs[i].timg.total() * input_imgs[i].timg.elemSize())
             );
+
             engine_->BindingInput(infer_input_data);
 
             std::map<int, KeyPoint> item_points;
             postprocess(input_imgs[i], item_points);
 
-            // for (auto& keyP : item_points) {
-            //     keyP.second.x /= (float)image_w;
-            //     keyP.second.y /= (float)image_h;
-            // }
+
+            for (auto& point : item_points) {
+                point.second.x += input_imgs[i].padding_roi.x;
+                point.second.y += input_imgs[i].padding_roi.y;
+            }
+
             key_points(testMat, item_points);
-            // char save_file[100];
-            // sprintf(save_file, "./output/pose/kkk/item%d.jpg", i);
-            // cv::imwrite(save_file, input_imgs[i].src_img);
-        }
-
-        //     char save_file[100];
-        //     sprintf(save_file, "./output/pose/kkk/item%d.jpg", i);
             cv::imwrite("./output/test.jpg", testMat);
-
+        }
+        
+        auto time_end= iTime::timestamp_now();
+        LOG_INFO("inference done %lld ms !", time_end - time_start);
         return SUCCESS;
     }
 

@@ -182,7 +182,7 @@ size_t YOLOv8PoseLayer::getWorkspaceSize(
 int32_t YOLOv8PoseLayer::enqueue(
     nvinfer1::PluginTensorDesc const* inputDesc, nvinfer1::PluginTensorDesc const* outputDesc,
     void const* const* inputs, void* const* outputs, void* workspace, cudaStream_t stream
-) noexcept {
+) noexcept { 
     try {
         mParam.batchSize = inputDesc[0].dims.d[0];
 
@@ -196,11 +196,11 @@ int32_t YOLOv8PoseLayer::enqueue(
         const void* const ps2Input  = inputs[7];
         const void* const ps3Input  = inputs[8];
 
-        void* numDetectionsOutput      = outputs[0];
-        void* nmsClassesOutput   = outputs[1];
-        void* nmsScoresOutput    = outputs[2];
-        void* nmsBoxesOutput     = outputs[3];
-        void* nmsKeyPointsOutput = outputs[4];
+        void* numDetectionsOutput = outputs[0];
+        void* nmsClassesOutput    = outputs[1];
+        void* nmsScoresOutput     = outputs[2];
+        void* nmsBoxesOutput      = outputs[3];
+        void* nmsKeyPointsOutput  = outputs[4];
         
         return YOLOv8PoseLayerInference(
             mParam,
