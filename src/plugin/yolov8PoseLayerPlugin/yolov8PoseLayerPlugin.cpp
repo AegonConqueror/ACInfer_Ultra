@@ -34,17 +34,19 @@ YOLOv8PoseLayer::YOLOv8PoseLayer(void const *data, size_t length) {
     read(d, mParam);
 }
 
-YOLOv8PoseLayer::YOLOv8PoseLayer(YOLOv8PoseLayerParameters params) {};
+YOLOv8PoseLayer::YOLOv8PoseLayer(YOLOv8PoseLayerParameters param): mParam(param) {};
 
 nvinfer1::IPluginV2DynamicExt* YOLOv8PoseLayer::clone() const noexcept {
     nvinfer1::IPluginV2DynamicExt* plugin_layer{nullptr};
     try {
         plugin_layer = new YOLOv8PoseLayer(mParam);
+        plugin_layer->setPluginNamespace(m_Namespace.c_str());
+        return plugin_layer;
     }
     catch(const std::exception& e) {
         std::cerr << e.what() << '\n';
     }
-    return plugin_layer;
+    return nullptr;
 }
 
 nvinfer1::DimsExprs YOLOv8PoseLayer::getOutputDimensions(
@@ -81,6 +83,7 @@ nvinfer1::DimsExprs YOLOv8PoseLayer::getOutputDimensions(
         out_dim.d[0] = inputs[0].d[0];
         out_dim.d[1] = exprBuilder.constant(mParam.numOutputBoxes);
         out_dim.d[2] = exprBuilder.constant(3 * mParam.numKeypoints);
+        // printf(">>4:[%d, %d, %d]\n", out_dim.d[0]->getConstantValue(), out_dim.d[1]->getConstantValue(), out_dim.d[2]->getConstantValue());
     }
     return out_dim;
 }
@@ -112,10 +115,10 @@ void YOLOv8PoseLayer::configurePlugin(
     assert(nbInput == 9);
 
     mParam.numClasses = in[1].desc.dims.d[1];
-    mParam.numKeypoints = static_cast<int>(in[6].desc.dims.d[1] / 3);
     mParam.inputWidth = in[1].desc.dims.d[3] * mParam.minStride;
     mParam.inputHeight = in[1].desc.dims.d[2] * mParam.minStride;
 
+    mParam.numAnchors = 0;
     for (size_t i = 0; i < 3; i++) {
         assert(in[i * 2].desc.dims.nbDims == 4);
         mParam.numAnchors += in[i * 2].desc.dims.d[3];
@@ -125,19 +128,18 @@ void YOLOv8PoseLayer::configurePlugin(
             mParam.headEnd = mParam.numAnchors;
     }
 
-    for (size_t i = 0; i < 4; i++) {
-        mParam.reg1Size = in[0].desc.dims.d[1] * in[0].desc.dims.d[2] * in[0].desc.dims.d[3];
-        mParam.reg2Size = in[2].desc.dims.d[1] * in[2].desc.dims.d[2] * in[2].desc.dims.d[3];
-        mParam.reg3Size = in[4].desc.dims.d[1] * in[4].desc.dims.d[2] * in[4].desc.dims.d[3];
+    mParam.reg1Size = in[0].desc.dims.d[1] * in[0].desc.dims.d[2] * in[0].desc.dims.d[3];
+    mParam.reg2Size = in[2].desc.dims.d[1] * in[2].desc.dims.d[2] * in[2].desc.dims.d[3];
+    mParam.reg3Size = in[4].desc.dims.d[1] * in[4].desc.dims.d[2] * in[4].desc.dims.d[3];
 
-        mParam.cls1Size = in[1].desc.dims.d[1] * in[1].desc.dims.d[2] * in[1].desc.dims.d[3];
-        mParam.cls2Size = in[3].desc.dims.d[1] * in[3].desc.dims.d[2] * in[3].desc.dims.d[3];
-        mParam.cls3Size = in[5].desc.dims.d[1] * in[5].desc.dims.d[2] * in[5].desc.dims.d[3];
+    mParam.cls1Size = in[1].desc.dims.d[1] * in[1].desc.dims.d[2] * in[1].desc.dims.d[3];
+    mParam.cls2Size = in[3].desc.dims.d[1] * in[3].desc.dims.d[2] * in[3].desc.dims.d[3];
+    mParam.cls3Size = in[5].desc.dims.d[1] * in[5].desc.dims.d[2] * in[5].desc.dims.d[3];
 
-        mParam.ps1Size = in[6].desc.dims.d[1] * in[6].desc.dims.d[2] * in[6].desc.dims.d[3];
-        mParam.ps2Size = in[7].desc.dims.d[1] * in[7].desc.dims.d[2] * in[7].desc.dims.d[3];
-        mParam.ps3Size = in[8].desc.dims.d[1] * in[8].desc.dims.d[2] * in[8].desc.dims.d[3];
-    }
+    mParam.ps1Size = in[6].desc.dims.d[1] * in[6].desc.dims.d[2] * in[6].desc.dims.d[3];
+    mParam.ps2Size = in[7].desc.dims.d[1] * in[7].desc.dims.d[2] * in[7].desc.dims.d[3];
+    mParam.ps3Size = in[8].desc.dims.d[1] * in[8].desc.dims.d[2] * in[8].desc.dims.d[3];
+
 }
 
 bool YOLOv8PoseLayer::supportsFormatCombination(
@@ -159,12 +161,12 @@ bool YOLOv8PoseLayer::supportsFormatCombination(
 
 size_t YOLOv8PoseLayerWorkspaceSize(int batchSize, int numAnchors) {
 
-    size_t size_rects = (4 + 1) * sizeof(int) * batchSize * numAnchors;
-    size_t size_socres = sizeof(float) * batchSize * numAnchors;
-    size_t size_object_count = sizeof(int) * batchSize;
-    size_t size_keep = sizeof(int) * batchSize * numAnchors;
+    size_t size_rects =  batchSize * numAnchors * (4 + 1) * sizeof(float);
+    size_t size_classes =  batchSize * numAnchors * sizeof(int);
+    size_t size_object_count = batchSize * sizeof(int);
+    size_t size_keep =  batchSize * numAnchors * sizeof(int);
 
-    return size_rects + size_socres + size_object_count + size_keep;
+    return size_rects + size_classes + size_object_count + size_keep;
 }
 
 size_t YOLOv8PoseLayer::getWorkspaceSize(
@@ -176,6 +178,7 @@ size_t YOLOv8PoseLayer::getWorkspaceSize(
     int stride_2_anchors = inputs[2].dims.d[3];
     int stride_3_anchors = inputs[4].dims.d[3];
     int numAnchors = stride_1_anchors + stride_2_anchors + stride_3_anchors;
+    
     return YOLOv8PoseLayerWorkspaceSize(batchSize, numAnchors);
 }
 
@@ -201,7 +204,7 @@ int32_t YOLOv8PoseLayer::enqueue(
         void* nmsScoresOutput     = outputs[2];
         void* nmsBoxesOutput      = outputs[3];
         void* nmsKeyPointsOutput  = outputs[4];
-        
+
         return YOLOv8PoseLayerInference(
             mParam,
             reg1Input, reg2Input, reg3Input,
@@ -221,6 +224,7 @@ YOLOv8PoseLayerPluginCreator::YOLOv8PoseLayerPluginCreator() noexcept {
     mPluginAttributes.clear();
     mPluginAttributes.emplace_back(nvinfer1::PluginField("max_output_boxes", nullptr, nvinfer1::PluginFieldType::kINT32, 1));
     mPluginAttributes.emplace_back(nvinfer1::PluginField("min_stride", nullptr, nvinfer1::PluginFieldType::kINT32, 1));
+    mPluginAttributes.emplace_back(nvinfer1::PluginField("num_keypoints", nullptr, nvinfer1::PluginFieldType::kINT32, 1));
     mPluginAttributes.emplace_back(nvinfer1::PluginField("socre_threshold", nullptr, nvinfer1::PluginFieldType::kFLOAT32, 1));
     mPluginAttributes.emplace_back(nvinfer1::PluginField("nms_threshold", nullptr, nvinfer1::PluginFieldType::kFLOAT32, 1));
     mFC.nbFields = mPluginAttributes.size();
@@ -246,6 +250,10 @@ nvinfer1::IPluginV2DynamicExt* YOLOv8PoseLayerPluginCreator::createPlugin(
                 assert(fields[i].type == nvinfer1::PluginFieldType::kINT32);
                 mParam.minStride = *(static_cast<const int *>(fields[i].data));
             }
+            if (!strcmp(attrName, "num_keypoints")) {
+                assert(fields[i].type == nvinfer1::PluginFieldType::kINT32);
+                mParam.numKeypoints = *(static_cast<const int *>(fields[i].data));
+            }
             if (!strcmp(attrName, "socre_threshold")) {
                 assert(fields[i].type == nvinfer1::PluginFieldType::kFLOAT32);
                 mParam.scoreThreshold = *(static_cast<const float *>(fields[i].data));
@@ -257,12 +265,14 @@ nvinfer1::IPluginV2DynamicExt* YOLOv8PoseLayerPluginCreator::createPlugin(
         }
 
         plugin_layer = new YOLOv8PoseLayer(mParam);
+        plugin_layer->setPluginNamespace(mNamespace.c_str());
+        return plugin_layer;
     }
     catch(const std::exception& e) {
         std::cerr << e.what() << '\n';
     }
 
-    return plugin_layer;
+    return nullptr;
 }
 
 nvinfer1::IPluginV2DynamicExt* YOLOv8PoseLayerPluginCreator::deserializePlugin(
@@ -271,11 +281,13 @@ nvinfer1::IPluginV2DynamicExt* YOLOv8PoseLayerPluginCreator::deserializePlugin(
     nvinfer1::IPluginV2DynamicExt *plugin{nullptr};
     try {
         plugin = new YOLOv8PoseLayer(serialData, serialLength);
+        plugin->setPluginNamespace(mNamespace.c_str());
+        return plugin;
     }
     catch(const std::exception& e) {
         std::cerr << e.what() << '\n';
     }
-    return plugin;
+    return nullptr;
 }
 // 注册插件。 在实现了各个类方法后，需要调用宏对plugin进行注册。以方便TensorRT识别并找到对应的Plugin。
 REGISTER_TENSORRT_PLUGIN(YOLOv8PoseLayerPluginCreator);

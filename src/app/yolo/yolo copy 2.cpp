@@ -186,11 +186,43 @@ namespace YOLO {
         } else {
             if (yolo_type_ == Type::V8) {
                 if (task_type_ == Task::YOLO_POSE) {
-                    int* numDetectionsOutput = (int *)infer_output_data[engine_->GetOutputIndex("NumDetections")].first;
-                    int* nmsClassesOutput = (int *)infer_output_data[engine_->GetOutputIndex("DetectionClasses")].first;
-                    float* nmsScoresOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionScores")].first;
-                    float* nmsBoxesOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionBoxes")].first;
-                    float* nmsKeyPointsOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionKeyPoints")].first;
+                    std::vector<std::string> pose_names = {"reg1", "cls1", "reg2", "cls2", "reg3", "cls3", "ps1", "ps2", "ps3"};
+                    if (pose_names.size() != output_num) return LOAD_MODEL_FAIL;
+                    float* reg1Input = (float *)infer_output_data[engine_->GetOutputIndex("reg1")].first;
+                    float* cls1Input = (float *)infer_output_data[engine_->GetOutputIndex("cls1")].first;
+                    float* reg2Input = (float *)infer_output_data[engine_->GetOutputIndex("reg2")].first;
+                    float* cls2Input = (float *)infer_output_data[engine_->GetOutputIndex("cls2")].first;
+                    float* reg3Input = (float *)infer_output_data[engine_->GetOutputIndex("reg3")].first;
+                    float* cls3Input = (float *)infer_output_data[engine_->GetOutputIndex("cls3")].first;
+                    float* ps1Input  = (float *)infer_output_data[engine_->GetOutputIndex("ps1")].first;
+                    float* ps2Input  = (float *)infer_output_data[engine_->GetOutputIndex("ps2")].first;
+                    float* ps3Input  = (float *)infer_output_data[engine_->GetOutputIndex("ps3")].first;
+
+                    YOLOv8PoseLayerParameters param;
+                    param.reg1Size = infer_output_data[engine_->GetOutputIndex("reg1")].second;
+                    param.cls1Size = infer_output_data[engine_->GetOutputIndex("cls1")].second; 
+                    param.reg2Size = infer_output_data[engine_->GetOutputIndex("reg2")].second; 
+                    param.cls2Size = infer_output_data[engine_->GetOutputIndex("cls2")].second; 
+                    param.reg3Size = infer_output_data[engine_->GetOutputIndex("reg3")].second; 
+                    param.cls3Size = infer_output_data[engine_->GetOutputIndex("cls3")].second; 
+                    param.ps1Size = infer_output_data[engine_->GetOutputIndex("ps1")].second; 
+                    param.ps2Size = infer_output_data[engine_->GetOutputIndex("ps2")].second; 
+                    param.ps3Size = infer_output_data[engine_->GetOutputIndex("ps3")].second; 
+
+                    int* numDetectionsOutput = (int *)malloc(sizeof(int));
+                    int* nmsClassesOutput    = (int *)malloc(sizeof(int) * param.numOutputBoxes);
+                    float* nmsScoresOutput     = (float *)malloc(sizeof(float) * param.numOutputBoxes);
+                    float* nmsBoxesOutput      = (float *)malloc(sizeof(float) * param.numOutputBoxes * 4);
+                    float* nmsKeyPointsOutput  = (float *)malloc(sizeof(float) * param.numOutputBoxes * 3 * param.numKeypoints);
+
+                    YOLOv8PoseLayerInference(
+                        param,
+                        reg1Input, reg2Input, reg3Input,
+                        cls1Input, cls2Input, cls3Input,
+                        ps1Input, ps2Input, ps3Input,
+                        numDetectionsOutput, nmsClassesOutput, nmsScoresOutput, 
+                        nmsBoxesOutput, nmsKeyPointsOutput
+                    );
 
                     for (int i = 0; i < numDetectionsOutput[0]; i++) {
                         yolo_result dr;

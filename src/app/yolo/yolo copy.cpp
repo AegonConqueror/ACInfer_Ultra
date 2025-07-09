@@ -6,7 +6,7 @@
 #include "process/yolov8_postprocess.h"
 
 #include "process/yolov8_postprocess.cuh"
-#include "cuda_runtime_api.h"
+
 
 namespace YOLO {
 
@@ -186,29 +186,57 @@ namespace YOLO {
         } else {
             if (yolo_type_ == Type::V8) {
                 if (task_type_ == Task::YOLO_POSE) {
-                    int* numDetectionsOutput = (int *)infer_output_data[engine_->GetOutputIndex("NumDetections")].first;
-                    int* nmsClassesOutput = (int *)infer_output_data[engine_->GetOutputIndex("DetectionClasses")].first;
-                    float* nmsScoresOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionScores")].first;
-                    float* nmsBoxesOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionBoxes")].first;
-                    float* nmsKeyPointsOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionKeyPoints")].first;
+                    std::vector<std::string> pose_names = {"reg1", "cls1", "reg2", "cls2", "reg3", "cls3", "ps1", "ps2", "ps3"};
+                    std::vector<int> output_size(output_num);
+                    for (size_t i = 0; i < output_num; ++i) {
+                        output_size[i] = infer_output_data[engine_->GetOutputIndex(pose_names[i])].second;
+                    }
 
-                    for (int i = 0; i < numDetectionsOutput[0]; i++) {
+                    int total_size = std::accumulate(output_size.begin(), output_size.end(), 0);
+
+                    float* output_data = (float *)malloc(total_size * sizeof(float));
+            
+                    int pos = 0;
+                    for (size_t i = 0; i < output_num; ++i) {
+                        float* src = (float *)infer_output_data[engine_->GetOutputIndex(pose_names[i])].first;
+                        size_t offset = output_size[i];
+
+                        memcpy(output_data + pos, src, offset * sizeof(float));
+                        pos += offset;
+                    }
+
+                    int keepTopK = 20;
+            
+                    int num_dets[1];
+                    int det_classes[keepTopK]; 
+                    float det_scores[keepTopK]; 
+                    float det_boxes[keepTopK * 4];
+                    float det_keypoints[keepTopK * 3 * model_keypoints_num_];
+
+                    yolov8_pose_decode_gpu(
+                        output_data, output_size.data(), output_num, 
+                        num_dets, det_classes, det_scores, det_boxes, det_keypoints,
+                        input_w, input_h, image_w, image_h, model_class_num_,
+                        0.25, 0.45, model_keypoints_num_
+                    );
+
+                    for (int i = 0; i < num_dets[0]; i++) {
                         yolo_result dr;
 
-                        int classId = nmsClassesOutput[i];
-                        float conf = nmsScoresOutput[i];
+                        int classId = det_classes[i];
+                        float conf = det_scores[i];
                         
-                        int xmin = int(nmsBoxesOutput[i * 4 + 0] * image_w / input_w + 0.5);
-                        int ymin = int(nmsBoxesOutput[i * 4 + 1] * image_w / input_w + 0.5);
-                        int xmax = int(nmsBoxesOutput[i * 4 + 2] * image_w / input_w + 0.5);
-                        int ymax = int(nmsBoxesOutput[i * 4 + 3] * image_w / input_w + 0.5);
+                        int xmin = int(det_boxes[i * 4 + 0]);
+                        int ymin = int(det_boxes[i * 4 + 1]);
+                        int xmax = int(det_boxes[i * 4 + 2]);
+                        int ymax = int(det_boxes[i * 4 + 3]);
 
                         std::map<int, KeyPoint> kp_map;
                         for (int k = 0; k < model_keypoints_num_; k++) {
                             KeyPoint kp;
-                            kp.x = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 0] * image_w / input_w;
-                            kp.y = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 1] * image_w / input_w;
-                            kp.score = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 2];
+                            kp.x = det_keypoints[k * model_keypoints_num_ * 3 + i * 3 + 0];
+                            kp.y = det_keypoints[k * model_keypoints_num_ * 3 + i * 3 + 1];
+                            kp.score = det_keypoints[k * model_keypoints_num_ * 3 + i * 3 + 2];
                             kp.id = k;
                             kp_map[k] = kp;
                         }
