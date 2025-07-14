@@ -7,6 +7,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
+split_onnx_file = "./onnx/modified/yolov8s_silu_pose_split.onnx"
+dst_onnx_file = "./onnx/modified/yolov8s_silu_pose_plugin.onnx"
+
+input_width = 640
+input_height = 640
 max_output_boxes = 20
 min_stride = 8
 num_keypoints = 17
@@ -14,6 +19,9 @@ socre_threshold = 0.25
 nms_threshold = 0.45
 
 pose_layer_attrs = {
+    "input_width": input_width,
+    "input_height": input_width,
+    "max_output_boxes": max_output_boxes,
     "max_output_boxes": max_output_boxes,
     "min_stride": min_stride,
     "num_keypoints": num_keypoints,
@@ -37,8 +45,7 @@ detection_keypoints = gs.Variable(name="DetectionKeyPoints", dtype=np.float32, s
 yolov8_pose_layer_outputs = [num_detections, detection_classes, detection_scores, detection_boxes, detection_keypoints]
 
 # ======================================= 模型读取 =======================================
-graph = gs.import_onnx(onnx.load(ROOT / "onnx/yolov8s_silu_pose_split.onnx"))
-# print([*graph.outputs, meshgrid, headStarts])
+graph = gs.import_onnx(onnx.load(ROOT / split_onnx_file))
 
 yolov8_pose_layer_node = gs.Node(
     name="yolov8_pose_layer",
@@ -53,5 +60,5 @@ graph.outputs = yolov8_pose_layer_outputs
 
 graph.cleanup()
 
-onnx.save(gs.export_onnx(graph), ROOT / "onnx/yolov8s_silu_pose_plugin_player.onnx")
+onnx.save(gs.export_onnx(graph), ROOT / dst_onnx_file)
 print('done!')

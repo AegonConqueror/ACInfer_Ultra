@@ -28,9 +28,7 @@ float iou_gpu(
 __global__
 void YOLOv8PoseLayerNMS(
     YOLOv8PoseLayerParameters param,
-    const float*  reg1Data, const float*  reg2Data, const float*  reg3Data, 
-    const float*  cls1Data, const float*  cls2Data, const float*  cls3Data, 
-    const float*  ps1Data, const float*  ps2Data, const float*  ps3Data,
+    const float* regData, const float* clsData, const float* psData, int headStart, int headEnd,
     float* outputRects, int* outputClasses, int* outputCount, int* outputKeep,
     int* __restrict__ numDetectionsOutput, int* __restrict__ nmsClassesOutput, 
     float* __restrict__ nmsScoresOutput, float* __restrict__ nmsBoxesOutput, 
@@ -41,29 +39,17 @@ void YOLOv8PoseLayerNMS(
     if (imageIdx >= param.batchSize) return;
     if (anchorIdx >= param.numAnchors) return;
 
-    int head_idx = 0;
-    int base_tid = anchorIdx % param.numAnchors;
+    int head_idx = (anchorIdx < headStart) ? 0 : (anchorIdx < headEnd) ? 1 : 2;
 
-    if (base_tid < param.headStart)
-        head_idx = 0;
-    else if (base_tid < param.headEnd)
-        head_idx = 1;
-    else
-        head_idx = 2;
-
-    int local_start = (head_idx == 1) * param.headStart + (head_idx == 2) * param.headEnd;
+    int local_start = (head_idx == 1) * headStart + (head_idx == 2) * headEnd;
     
     int stride = param.minStride << head_idx;
 
     int h = param.inputHeight / stride;
     int w = param.inputWidth / stride;
-    int local_idx = base_tid - local_start;
+    int local_idx = anchorIdx - local_start;
     int row = local_idx / w;
     int col = local_idx % w;
-    
-    const float* reg = (head_idx == 0) ? reg1Data + imageIdx * param.reg1Size : ((head_idx == 1) ? reg2Data + imageIdx * param.reg2Size: reg3Data + imageIdx * param.reg3Size);
-    const float* cls = (head_idx == 0) ? cls1Data + imageIdx * param.cls1Size: ((head_idx == 1) ? cls2Data + imageIdx * param.cls2Size : cls3Data + imageIdx * param.cls3Size);
-    const float* ps  = (head_idx == 0) ? ps1Data + imageIdx * param.ps1Size : ((head_idx == 1) ? ps2Data + imageIdx * param.ps2Size : ps3Data + imageIdx * param.ps3Size);
 
     float cx = float(col + 0.5);
     float cy = float(row + 0.5);
@@ -71,7 +57,7 @@ void YOLOv8PoseLayerNMS(
     float cls_max = -1;
     int cls_index = -1;
     for (int cl = 0; cl < param.numClasses; cl++) {
-        float cls_val = sigmoid_gpu(cls[cl * h * w + row * w + col]);
+        float cls_val = clsData[cl * param.numAnchors + anchorIdx];
         if (cls_val > cls_max) {
             cls_max = cls_val;
             cls_index = cl;
@@ -80,10 +66,10 @@ void YOLOv8PoseLayerNMS(
 
     if (cls_max < param.scoreThreshold) return;
 
-    float dx1 = reg[0 * h * w + row * w + col];
-    float dy1 = reg[1 * h * w + row * w + col];
-    float dx2 = reg[2 * h * w + row * w + col];
-    float dy2 = reg[3 * h * w + row * w + col];
+    float dx1 = regData[0 * param.numAnchors + anchorIdx];
+    float dy1 = regData[1 * param.numAnchors + anchorIdx];
+    float dx2 = regData[2 * param.numAnchors + anchorIdx];
+    float dy2 = regData[3 * param.numAnchors + anchorIdx];
 
     float xmin = (cx - dx1) * stride;
     float ymin = (cy - dy1) * stride;
@@ -151,9 +137,9 @@ void YOLOv8PoseLayerNMS(
 
         // DetectionKeyPoints
         for (int k = 0; k < param.numKeypoints; k++) {
-            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 0] = (ps[(k * 3 + 0) * h * w + row * w + col] * 2 + (cx - 0.5f)) * stride;
-            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 1] = (ps[(k * 3 + 1) * h * w + row * w + col] * 2 + (cy - 0.5f)) * stride;
-            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 2] = sigmoid_gpu(ps[(k * 3 + 2) * h * w + row * w + col]);
+            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 0] = (psData[(k * 3 + 0) * param.numAnchors + anchorIdx] * 2 + (cx - 0.5f)) * stride;
+            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 1] = (psData[(k * 3 + 1) * param.numAnchors + anchorIdx] * 2 + (cy - 0.5f)) * stride;
+            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 2] = sigmoid_gpu(psData[(k * 3 + 2) * param.numAnchors + anchorIdx]);
         }
     }
 }
@@ -168,9 +154,7 @@ T* YOLOv8PoseLayerWorkspace(void* workspace, size_t& offset, size_t elements) {
 
 pluginStatus_t YOLOv8PoseLayerLauncher(
     YOLOv8PoseLayerParameters param,
-    const void* reg1Input, const void* reg2Input, const void* reg3Input,
-    const void* cls1Input, const void* cls2Input, const void* cls3Input,
-    const void* ps1Input, const void* ps2Input, const void* ps3Input,
+    const void* regInput, const void* clsInput, const void* psInput,
     void* numDetectionsOutput, void* nmsClassesOutput, void* nmsScoresOutput, 
     void* nmsBoxesOutput, void* nmsKeyPointsOutput, void* workspace, cudaStream_t stream
 ) {
@@ -196,15 +180,18 @@ pluginStatus_t YOLOv8PoseLayerLauncher(
     int* outputKeep = YOLOv8PoseLayerWorkspace<int>(workspace, workspaceOffset, keep_element);
     cudaMemsetAsync(outputKeep, -1, sizeof(int) * param.numAnchors * param.batchSize, stream);
 
+    int headStart = (param.inputHeight / param.minStride) * (param.inputWidth / param.minStride);
+    int midMapSize = (param.inputHeight / (param.minStride << 1)) * (param.inputWidth / (param.minStride << 1));
+    int headEnd = headStart + midMapSize;
+
     int threadSize = 256;
     dim3 block(threadSize, 1);
     dim3 grid(param.batchSize, (param.numAnchors + threadSize - 1) / threadSize);
 
     YOLOv8PoseLayerNMS<<<grid, block, 0, stream>>>(
         param,
-        (const float *)reg1Input, (const float *)reg2Input, (const float *)reg3Input, 
-        (const float *)cls1Input, (const float *)cls2Input, (const float *)cls3Input, 
-        (const float *)ps1Input, (const float *)ps2Input, (const float *)ps3Input,
+        (const float *)regInput, (const float *)clsInput, (const float *)psInput,
+        headStart, headEnd,
         outputRects, outputClasses, outputCount, outputKeep,
         (int *)numDetectionsOutput, (int *)nmsClassesOutput, 
         (float *)nmsScoresOutput, (float *)nmsBoxesOutput, 
@@ -219,17 +206,13 @@ pluginStatus_t YOLOv8PoseLayerLauncher(
 
 pluginStatus_t YOLOv8PoseLayerInference(
     YOLOv8PoseLayerParameters param,
-    const void* reg1Input, const void* reg2Input, const void* reg3Input,
-    const void* cls1Input, const void* cls2Input, const void* cls3Input,
-    const void* ps1Input, const void* ps2Input, const void* ps3Input,
+    const void* regInput, const void* clsInput, const void* psInput,
     void* numDetectionsOutput, void* nmsClassesOutput, void* nmsScoresOutput, 
     void* nmsBoxesOutput, void* nmsKeyPointsOutput, void* workspace, cudaStream_t stream
 ) {
     return YOLOv8PoseLayerLauncher(
         param,
-        reg1Input, reg2Input, reg3Input,
-        cls1Input, cls2Input, cls3Input,
-        ps1Input, ps2Input, ps3Input,
+        regInput, clsInput, psInput,
         numDetectionsOutput, nmsClassesOutput, nmsScoresOutput,
         nmsBoxesOutput, nmsKeyPointsOutput, workspace, stream 
     );

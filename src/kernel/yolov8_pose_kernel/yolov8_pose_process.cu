@@ -1,19 +1,7 @@
+
 #include <cuda_runtime.h>
-
+#include "plugin/yolov8PoseLayerPlugin/yolov8PoseLayerParameters.h"
 #include "trt/trt_cuda.h"
-
-struct KeyPointGPU {
-    float x, y;
-    float score;
-};
-
-struct PoseRectGPU {
-    int imageId;
-    int xmin, ymin, xmax, ymax;
-    int classId;
-    float score;
-    KeyPointGPU keypoints[17];
-};
 
 __device__ 
 float sigmoid_gpu(float x) {
@@ -21,77 +9,67 @@ float sigmoid_gpu(float x) {
 }
 
 __device__
-float iou_gpu(const PoseRectGPU &a, const PoseRectGPU &b) {
-    float xmin = fmaxf(a.xmin, b.xmin);
-    float ymin = fmaxf(a.ymin, b.ymin);
-    float xmax = fminf(a.xmax, b.xmax);
-    float ymax = fminf(a.ymax, b.ymax);
+float iou_gpu(
+    const float xmin_A, const float ymin_A, const float xmax_A, const float ymax_A,
+    const float xmin_B, const float ymin_B, const float xmax_B, const float ymax_B
+) {
+    float xmin = fmaxf(xmin_A, xmin_B);
+    float ymin = fmaxf(ymin_A, ymin_B);
+    float xmax = fminf(xmax_A, xmax_B);
+    float ymax = fminf(ymax_A, ymax_B);
     float iw = fmaxf(0.0f, xmax - xmin);
     float ih = fmaxf(0.0f, ymax - ymin);
     float inter = iw * ih;
-    float area1 = (a.xmax - a.xmin) * (a.ymax - a.ymin);
-    float area2 = (b.xmax - b.xmin) * (b.ymax - b.ymin);
+    float area1 = (xmax_A- xmin_A) * (ymax_A - ymin_A);
+    float area2 = (xmax_B - xmin_B) * (ymax_B - ymin_B);
     return inter / (area1 + area2 - inter);
 }
 
 __global__
-void yolov8_pose_decode_kernel(
-    float* pBlob, int* pBlob_offset, PoseRectGPU* outputRects, int* obj_count, int* keep,
-    int* objectNum, int* det_classes, float* det_scores, float* det_boxes, float* det_keypoints,
-    int total_size, int headNum, int total_anchors, int head_start, int head_end, int min_stride, 
-    int input_w, int input_h, int image_w, int image_h, 
-    int num_class, int num_keypoints, float conf_thresh, float nms_thresh
-){
+void YOLOv8PoseLayerNMS(
+    YOLOv8PoseLayerParameters param,
+    float* regData, float* clsData, float* psData, int headStart, int headEnd,
+    float* outputRects, int* outputClasses, int* outputCount, int* outputKeep,
+    int* __restrict__ numDetectionsOutput, int* __restrict__ nmsClassesOutput, 
+    float* __restrict__ nmsScoresOutput, float* __restrict__ nmsBoxesOutput, 
+    float* __restrict__ nmsKeyPointsOutput
+) {
     int imageIdx = blockIdx.x;
-    int tid = blockIdx.y * blockDim.x + threadIdx.x;
-    if (imageIdx >= 2) return;
-    if (tid >= total_anchors) return;
+    int anchorIdx = blockIdx.y * blockDim.x + threadIdx.x;
+    if (imageIdx >= param.batchSize) return;
+    if (anchorIdx >= param.numAnchors) return;
 
-    int head_idx = 0;
-    int base_tid = tid % total_anchors;
-    
-    if (base_tid < head_start)
-        head_idx = 0;
-    else if (base_tid < head_end)
-        head_idx = 1;
-    else
-        head_idx = 2;
-    
-    int local_start = (head_idx == 1) * head_start + (head_idx == 2) * head_end;
+    int head_idx = (anchorIdx < headStart) ? 0 : (anchorIdx < headEnd) ? 1 : 2;
 
-    int stride = min_stride << head_idx;
+    int local_start = (head_idx == 1) * headStart + (head_idx == 2) * headEnd;
     
-    int h = input_h / stride;
-    int w = input_w / stride;
-    int local_idx = base_tid - local_start;
+    int stride = param.minStride << head_idx;
+
+    int h = param.inputHeight / stride;
+    int w = param.inputWidth / stride;
+    int local_idx = anchorIdx - local_start;
     int row = local_idx / w;
     int col = local_idx % w;
 
-    int batch_offset = imageIdx * total_anchors;
-    
-    float* reg = pBlob + pBlob_offset[head_idx * 2 + 0] + imageIdx * total_size;
-    float* cls = pBlob + pBlob_offset[head_idx * 2 + 1] + imageIdx * total_size;
-    float* ps  = pBlob + pBlob_offset[head_idx + headNum * 2] + imageIdx * total_size;
-    
     float cx = float(col + 0.5);
     float cy = float(row + 0.5);
 
     float cls_max = -1;
     int cls_index = -1;
-    for (int cl = 0; cl < num_class; cl++) {
-        float cls_val = sigmoid_gpu(cls[cl * h * w + row * w + col]);
+    for (int cl = 0; cl < param.numClasses; cl++) {
+        float cls_val = clsData[cl * param.numAnchors + anchorIdx];
         if (cls_val > cls_max) {
             cls_max = cls_val;
             cls_index = cl;
         }
     }
 
-    if (cls_max < conf_thresh) return;
+    if (cls_max < param.scoreThreshold) return;
 
-    float dx1 = reg[0 * h * w + row * w + col];
-    float dy1 = reg[1 * h * w + row * w + col];
-    float dx2 = reg[2 * h * w + row * w + col];
-    float dy2 = reg[3 * h * w + row * w + col];
+    float dx1 = regData[0 * param.numAnchors + anchorIdx];
+    float dy1 = regData[1 * param.numAnchors + anchorIdx];
+    float dx2 = regData[2 * param.numAnchors + anchorIdx];
+    float dy2 = regData[3 * param.numAnchors + anchorIdx];
 
     float xmin = (cx - dx1) * stride;
     float ymin = (cy - dy1) * stride;
@@ -100,162 +78,184 @@ void yolov8_pose_decode_kernel(
     
     xmin = fmaxf(0.0f, xmin);
     ymin = fmaxf(0.0f, ymin);
-    xmax = fminf(input_w, xmax);
-    ymax = fminf(input_h, ymax);
+    xmax = fminf(param.inputWidth, xmax);
+    ymax = fminf(param.inputHeight, ymax);
 
-    int id = atomicAdd(&obj_count[imageIdx], 1);
-    keep[id + batch_offset] = 1;
+    int batch_offset = imageIdx * param.numAnchors;
 
-    PoseRectGPU& temp = outputRects[id + batch_offset];
-    temp.imageId = imageIdx;
-    temp.xmin = int(xmin * image_w / input_w + 0.5);
-    temp.ymin = int(ymin * image_h / input_h + 0.5);
-    temp.xmax = int(xmax * image_w / input_w + 0.5);
-    temp.ymax = int(ymax * image_h / input_h + 0.5);
-    temp.classId = cls_index;
-    temp.score = cls_max;
+    int id = atomicAdd(&outputCount[imageIdx], 1);
 
-    for (int kc = 0; kc < num_keypoints; kc++) {
-        temp.keypoints[kc].x = (ps[(kc * 3 + 0) * h * w + row * w + col] * 2 + (cx - 0.5f)) * stride * image_w / input_w;
-        temp.keypoints[kc].y = (ps[(kc * 3 + 1) * h * w + row * w + col] * 2 + (cy - 0.5f)) * stride * image_h / input_h;
-        temp.keypoints[kc].score = sigmoid_gpu(ps[(kc * 3 + 2) * h * w + row * w + col]);
-    }
+    int index_i = id + batch_offset;
+    outputKeep[index_i] = 1;
+
+    float* index_i_rect = outputRects + index_i * (4 + 1);
+    int* index_i_class = outputClasses + index_i;
+    index_i_rect[0] = xmin;
+    index_i_rect[1] = ymin;
+    index_i_rect[2] = xmax;
+    index_i_rect[3] = ymax;
+    index_i_rect[4] = cls_max;
+    index_i_class[0] = cls_index;
 
     __syncthreads();
 
-    for (int j = 0; j < obj_count[imageIdx]; j++) {
-        if (id + batch_offset == j + batch_offset || keep[j + batch_offset] == 0) continue;
-        if (
-            outputRects[id + batch_offset].score < outputRects[j + batch_offset].score && 
-            outputRects[id + batch_offset].classId == outputRects[j + batch_offset].classId &&
-            outputRects[id + batch_offset].imageId == outputRects[j + batch_offset].imageId
-        ) {
-            float iou = iou_gpu(outputRects[id + batch_offset], outputRects[j + batch_offset]);
-            if (iou > nms_thresh) {
-                keep[id + batch_offset] = 0;
+    for (int j = 0; j < outputCount[imageIdx]; j++) {
+        int index_j = j + batch_offset;
+
+        float* index_j_rect = outputRects + index_j * (4 + 1);
+        int* index_j_class = outputClasses + index_j;
+
+        if (index_i == index_j || outputKeep[index_j] == 0) continue;
+        if (index_i_class[0] == index_j_class[0] && index_i_rect[4] < index_j_rect[4]) {
+            float iou = iou_gpu(
+                index_i_rect[0], index_i_rect[1], index_i_rect[2], index_i_rect[3], 
+                index_j_rect[0], index_j_rect[1], index_j_rect[2], index_j_rect[3]
+            );
+            if (iou > param.iouThreshold) {
+                outputKeep[index_i] = 0;
             }
         }
     }
 
     __syncthreads();
 
-    if (keep[id + batch_offset] == 1) {
+    if (outputKeep[index_i] == 1) {
         // NumDetections
-        int kid = atomicAdd(&objectNum[imageIdx], 1);
+        int kid = atomicAdd(&numDetectionsOutput[imageIdx], 1);
 
         // DetectionClasses
-        det_classes[kid + imageIdx * 20] = outputRects[id + batch_offset].classId;
+        nmsClassesOutput[kid + imageIdx * param.numOutputBoxes] = index_i_class[0];
 
         // DetectionScores
-        det_scores[kid + imageIdx * 20] = outputRects[id + batch_offset].score;
+        nmsScoresOutput[kid + imageIdx * param.numOutputBoxes] = index_i_rect[4];
 
         // DetectionBoxes
-        det_boxes[(kid + imageIdx * 20) * 4 + 0] = outputRects[id + batch_offset].xmin;
-        det_boxes[(kid + imageIdx * 20) * 4 + 1] = outputRects[id + batch_offset].ymin;
-        det_boxes[(kid + imageIdx * 20) * 4 + 2] = outputRects[id + batch_offset].xmax;
-        det_boxes[(kid + imageIdx * 20) * 4 + 3] = outputRects[id + batch_offset].ymax;
+        nmsBoxesOutput[(kid + imageIdx * param.numOutputBoxes) * 4 + 0] = index_i_rect[0];
+        nmsBoxesOutput[(kid + imageIdx * param.numOutputBoxes) * 4 + 1] = index_i_rect[1];
+        nmsBoxesOutput[(kid + imageIdx * param.numOutputBoxes) * 4 + 2] = index_i_rect[2];
+        nmsBoxesOutput[(kid + imageIdx * param.numOutputBoxes) * 4 + 3] = index_i_rect[3];
 
         // DetectionKeyPoints
-        // float* det_keypoints_batch = det_keypoints + imageIdx * 20 * 3 * num_keypoints;
-        for (int k = 0; k < num_keypoints; k++) {
-            det_keypoints[(k + imageIdx * 20) * num_keypoints * 3 + kid * 3 + 0] = outputRects[id + batch_offset].keypoints[k].x;
-            det_keypoints[(k + imageIdx * 20) * num_keypoints * 3 + kid * 3 + 1] = outputRects[id + batch_offset].keypoints[k].y;
-            det_keypoints[(k + imageIdx * 20) * num_keypoints * 3 + kid * 3 + 2] = outputRects[id + batch_offset].keypoints[k].score;
+        for (int k = 0; k < param.numKeypoints; k++) {
+            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 0] = (psData[(k * 3 + 0) * param.numAnchors + anchorIdx] * 2 + (cx - 0.5f)) * stride;
+            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 1] = (psData[(k * 3 + 1) * param.numAnchors + anchorIdx] * 2 + (cy - 0.5f)) * stride;
+            nmsKeyPointsOutput[(k + imageIdx * param.numOutputBoxes) * param.numKeypoints * 3 + kid * 3 + 2] = sigmoid_gpu(psData[(k * 3 + 2) * param.numAnchors + anchorIdx]);
         }
     }
 }
 
-void yolov8_pose_decode_gpu(
-    float* output_data, int* output_size, int output_num,
-    int* num_dets, int* det_classes, float* det_scores, float* det_boxes, float* det_keypoints,
-    int input_w, int input_h, int image_w, int image_h, int class_num,
-    float conf_thresh, float nms_thresh, int keypoint_num
+void YOLOv8PoseLayerLauncher(
+    YOLOv8PoseLayerParameters param,
+    float* regInput, float* clsInput, float* psInput,
+    void* numDetectionsOutput, void* nmsClassesOutput, void* nmsScoresOutput, 
+    void* nmsBoxesOutput, void* nmsKeyPointsOutput
 ) {
+    checkCudaRuntime(cudaMemset(numDetectionsOutput, 0, sizeof(int) * param.batchSize));
+    checkCudaRuntime(cudaMemset(nmsClassesOutput, 0, sizeof(int) * param.batchSize * param.numOutputBoxes));
+    checkCudaRuntime(cudaMemset(nmsScoresOutput, 0, sizeof(float) * param.batchSize * param.numOutputBoxes));
+    checkCudaRuntime(cudaMemset(nmsBoxesOutput, 0, sizeof(float) * param.batchSize * param.numOutputBoxes * 4));
+    checkCudaRuntime(cudaMemset(nmsKeyPointsOutput, 0, sizeof(float) * param.batchSize * param.numOutputBoxes * param.numKeypoints * 3));
 
-    int headNum = 3;
-    int min_stride = 8;
-    int total_anchors = 0;
-    int head_start[headNum];
-    for (int i = 0; i < headNum; ++i){
-        int stride = min_stride << i;
-        int total = static_cast<int>((input_w * input_h) / (stride * stride));
-        head_start[i] = total_anchors;
-        total_anchors += total;
-    }
+    float* outputRects = nullptr;
+    int rects_element = (4 + 1) * param.batchSize * param.numAnchors;
+    checkCudaRuntime(cudaMalloc(&outputRects, rects_element * sizeof(float)));
 
-    int total_size = 0;
-    int pBlob_offset[output_num];
-    for (size_t i = 0; i < output_num; i++){
-        pBlob_offset[i] = total_size;
-        total_size += output_size[i];
-    }
+    int* outputClasses = nullptr;
+    int socres_element = param.batchSize * param.numAnchors;
+    checkCudaRuntime(cudaMalloc(&outputClasses, socres_element * sizeof(int)));
 
-    float* d_output_data = nullptr;
-    checkCudaRuntime(cudaMalloc(&d_output_data, total_size * sizeof(float)));
-    checkCudaRuntime(cudaMemcpy(d_output_data, output_data, total_size * sizeof(float), cudaMemcpyHostToDevice));
-    
-    int* d_pBlob_offset = nullptr;
-    checkCudaRuntime(cudaMalloc(&d_pBlob_offset, output_num * sizeof(int)));
-    checkCudaRuntime(cudaMemcpy(d_pBlob_offset, pBlob_offset, output_num * sizeof(int), cudaMemcpyHostToDevice));
-    
-    PoseRectGPU* d_output_objects;
-    int* d_objectCount;
-    int* d_keep;
-    checkCudaRuntime(cudaMalloc(&d_output_objects, sizeof(PoseRectGPU) * total_anchors));
-    checkCudaRuntime(cudaMalloc(&d_objectCount, sizeof(int)));
-    checkCudaRuntime(cudaMemset(d_objectCount, 0, sizeof(int)));
-    checkCudaRuntime(cudaMalloc(&d_keep, sizeof(int) * total_anchors));
-    checkCudaRuntime(cudaMemset(d_keep, -1, sizeof(int) * total_anchors));
+    int* outputCount = nullptr;
+    int count_element = param.batchSize;
+    checkCudaRuntime(cudaMalloc(&outputCount, count_element * sizeof(int)));
+    checkCudaRuntime(cudaMemset(outputCount, 0, sizeof(int) * count_element));
 
-    int keepTopK = 20;
+    int* outputKeep = nullptr;
+    int keep_element = param.batchSize * param.numAnchors;
+    checkCudaRuntime(cudaMalloc(&outputKeep, keep_element * sizeof(int)));
+    checkCudaRuntime(cudaMemset(outputKeep, -1, keep_element * sizeof(int)));
 
-    int* num_detections;
-    int* detection_classes;
-    float* detection_scores;
-    float* detection_boxes;
-    float* detection_keypoints;
-
-    checkCudaRuntime(cudaMalloc(&num_detections, sizeof(int)));
-    checkCudaRuntime(cudaMalloc(&detection_classes, sizeof(int) * keepTopK));
-    checkCudaRuntime(cudaMalloc(&detection_scores, sizeof(float) * keepTopK));
-    checkCudaRuntime(cudaMalloc(&detection_boxes, sizeof(float) * keepTopK * 4));
-    checkCudaRuntime(cudaMalloc(&detection_keypoints, sizeof(float) * keepTopK * 3 * keypoint_num));
-
-    checkCudaRuntime(cudaMemset(num_detections, 0, sizeof(int)));
-    checkCudaRuntime(cudaMemset(detection_classes, 0, sizeof(int) * keepTopK));
-    checkCudaRuntime(cudaMemset(detection_scores, 0, sizeof(float) * keepTopK));
-    checkCudaRuntime(cudaMemset(detection_boxes, 0, sizeof(float) * keepTopK * 4));
-    checkCudaRuntime(cudaMemset(detection_keypoints, 0, sizeof(float) * keepTopK * 3 * keypoint_num));
+    int headStart = (param.inputHeight / param.minStride) * (param.inputWidth / param.minStride);
+    int midMapSize = (param.inputHeight / (param.minStride << 1)) * (param.inputWidth / (param.minStride << 1));
+    int headEnd = headStart + midMapSize;
 
     int threadSize = 256;
-
     dim3 block(threadSize, 1);
-    dim3 grid(1, (total_anchors + threadSize - 1) / threadSize);
+    dim3 grid(param.batchSize, (param.numAnchors + threadSize - 1) / threadSize);
 
-    checkCudaKernel(
-        yolov8_pose_decode_kernel<<<grid, block>>>(
-            d_output_data, d_pBlob_offset, d_output_objects, d_objectCount, d_keep, 
-            num_detections, detection_classes, detection_scores, detection_boxes, detection_keypoints,
-            total_size, headNum, total_anchors, head_start[1], head_start[2], min_stride, 
-            input_w, input_h, image_w, image_h, class_num, keypoint_num, conf_thresh, nms_thresh
-        );
+    YOLOv8PoseLayerNMS<<<grid, block>>>(
+        param,
+        regInput, clsInput, psInput, headStart, headEnd,
+        outputRects, outputClasses, outputCount, outputKeep,
+        (int *)numDetectionsOutput, (int *)nmsClassesOutput, 
+        (float *)nmsScoresOutput, (float *)nmsBoxesOutput, 
+        (float *)nmsKeyPointsOutput
     );
+
+    checkCudaRuntime(cudaFree(outputKeep));
+    checkCudaRuntime(cudaFree(outputCount));
+    checkCudaRuntime(cudaFree(outputClasses));
+    checkCudaRuntime(cudaFree(outputRects));
+}
+
+void YOLOv8PoseLayerInference(
+    YOLOv8PoseLayerParameters param,
+    float* regInput, float* clsInput, float* psInput,
+    int regSize, int clsSize, int psSize,
+    int* numDetectionsOutput, int* nmsClassesOutput, float* nmsScoresOutput, 
+    float* nmsBoxesOutput, float* nmsKeyPointsOutput
+) {
+
+    float* d_regInput = nullptr;
+    float* d_clsInput = nullptr;
+    float* d_psInput = nullptr;
+
+    checkCudaRuntime(cudaMalloc(&d_regInput, regSize * sizeof(float)));
+    checkCudaRuntime(cudaMalloc(&d_clsInput, clsSize * sizeof(float)));
+    checkCudaRuntime(cudaMalloc(&d_psInput, psSize * sizeof(float)));
+
+    checkCudaRuntime(cudaMemcpy(d_regInput, regInput, regSize * sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaRuntime(cudaMemcpy(d_clsInput, clsInput, clsSize * sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaRuntime(cudaMemcpy(d_psInput, psInput, psSize * sizeof(float), cudaMemcpyHostToDevice));
     
-    checkCudaRuntime(cudaMemcpy(num_dets, num_detections, sizeof(int), cudaMemcpyDeviceToHost));
-    checkCudaRuntime(cudaMemcpy(det_classes, detection_classes, sizeof(int) * keepTopK, cudaMemcpyDeviceToHost));
-    checkCudaRuntime(cudaMemcpy(det_scores, detection_scores, sizeof(float) * keepTopK, cudaMemcpyDeviceToHost));
-    checkCudaRuntime(cudaMemcpy(det_boxes, detection_boxes, sizeof(float) * keepTopK * 4, cudaMemcpyDeviceToHost));
-    checkCudaRuntime(cudaMemcpy(det_keypoints, detection_keypoints, sizeof(float) * keepTopK * 3 * keypoint_num, cudaMemcpyDeviceToHost));
 
-    checkCudaRuntime(cudaFree(detection_keypoints));
-    checkCudaRuntime(cudaFree(detection_boxes));
-    checkCudaRuntime(cudaFree(detection_scores));
-    checkCudaRuntime(cudaFree(detection_classes));
-    checkCudaRuntime(cudaFree(num_detections));
+    void* d_numDetectionsOutput = nullptr;
+    void* d_nmsClassesOutput    = nullptr;
+    void* d_nmsScoresOutput     = nullptr;
+    void* d_nmsBoxesOutput      = nullptr;
+    void* d_nmsKeyPointsOutput  = nullptr;
 
-    checkCudaRuntime(cudaFree(d_keep));
-    checkCudaRuntime(cudaFree(d_objectCount));
-    checkCudaRuntime(cudaFree(d_output_objects));
-    checkCudaRuntime(cudaFree(d_pBlob_offset));
-    checkCudaRuntime(cudaFree(d_output_data));
+    checkCudaRuntime(cudaMalloc(&d_numDetectionsOutput, sizeof(int)));
+    checkCudaRuntime(cudaMalloc(&d_nmsClassesOutput, sizeof(int) * param.numOutputBoxes));
+    checkCudaRuntime(cudaMalloc(&d_nmsScoresOutput, sizeof(float) * param.numOutputBoxes));
+    checkCudaRuntime(cudaMalloc(&d_nmsBoxesOutput, sizeof(float) * param.numOutputBoxes * 4));
+    checkCudaRuntime(cudaMalloc(&d_nmsKeyPointsOutput, sizeof(float) * param.numOutputBoxes * 3 * param.numKeypoints));
+
+    checkCudaRuntime(cudaMemset(d_numDetectionsOutput, 0, sizeof(int)));
+    checkCudaRuntime(cudaMemset(d_nmsClassesOutput, 0, sizeof(int) * param.numOutputBoxes));
+    checkCudaRuntime(cudaMemset(d_nmsScoresOutput, 0, sizeof(float) * param.numOutputBoxes));
+    checkCudaRuntime(cudaMemset(d_nmsBoxesOutput, 0, sizeof(float) * param.numOutputBoxes * 4));
+    checkCudaRuntime(cudaMemset(d_nmsKeyPointsOutput, 0, sizeof(float) * param.numOutputBoxes * 3 * param.numKeypoints));
+
+    YOLOv8PoseLayerLauncher(
+        param,
+        d_regInput, d_clsInput, d_psInput,
+        d_numDetectionsOutput, d_nmsClassesOutput, d_nmsScoresOutput,
+        d_nmsBoxesOutput, d_nmsKeyPointsOutput
+    );
+
+    checkCudaRuntime(cudaMemcpy(numDetectionsOutput, d_numDetectionsOutput, sizeof(int), cudaMemcpyDeviceToHost));
+    checkCudaRuntime(cudaMemcpy(nmsClassesOutput, d_nmsClassesOutput, sizeof(int) * param.numOutputBoxes, cudaMemcpyDeviceToHost));
+    checkCudaRuntime(cudaMemcpy(nmsScoresOutput, d_nmsScoresOutput, sizeof(float) * param.numOutputBoxes, cudaMemcpyDeviceToHost));
+    checkCudaRuntime(cudaMemcpy(nmsBoxesOutput, d_nmsBoxesOutput, sizeof(float) * param.numOutputBoxes * 4, cudaMemcpyDeviceToHost));
+    checkCudaRuntime(cudaMemcpy(nmsKeyPointsOutput, d_nmsKeyPointsOutput, sizeof(float) * param.numOutputBoxes * 3 * param.numKeypoints, cudaMemcpyDeviceToHost));
+
+    checkCudaRuntime(cudaFree(d_nmsKeyPointsOutput));
+    checkCudaRuntime(cudaFree(d_nmsBoxesOutput));
+    checkCudaRuntime(cudaFree(d_nmsScoresOutput));
+    checkCudaRuntime(cudaFree(d_nmsClassesOutput));
+    checkCudaRuntime(cudaFree(d_numDetectionsOutput));
+
+    checkCudaRuntime(cudaFree(d_psInput));
+    checkCudaRuntime(cudaFree(d_clsInput));
+    checkCudaRuntime(cudaFree(d_regInput));
 }

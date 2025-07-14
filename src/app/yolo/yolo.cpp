@@ -3,11 +3,11 @@
 #include "engine.h"
 
 #include "process/preprocess.h"
-#include "process/yolov8_postprocess.h"
+#include "process/postprocess.h"
 
-#include "process/yolov8_postprocess.cuh"
-#include "cuda_runtime_api.h"
-
+// #if USE_TENSORRT == 1
+#include "process/postprocess.cuh"
+// #endif
 namespace YOLO {
 
     void letterbox_decode(std::vector<yolo_result>& objects, bool hor, int pad, Task task_type) {
@@ -65,6 +65,7 @@ namespace YOLO {
 
         int                         model_class_num_;
         int                         model_keypoints_num_;
+        int                         use_plugin_;
     };
 
     error_e ModelImpl::Load(
@@ -77,8 +78,9 @@ namespace YOLO {
         yolo_type_ = yolo_type;
         task_type_ = task_type;
         decode_type_ = decode_type;
+        use_plugin_ = use_plugin;
 
-        engine_ = create_engine(model_path, use_plugin);
+        engine_ = create_engine(model_path, use_plugin_);
         if (!engine_){
             LOG_ERROR("Deserialize engine failed.");
             return LOAD_MODEL_FAIL;
@@ -88,10 +90,10 @@ namespace YOLO {
         input_attr_    = engine_->GetInputAttrs()[0];
         output_attrs_ = engine_->GetOutputAttrs();
 
-        model_class_num_ = output_attrs_[engine_->GetOutputIndex("cls1")].dims[1];
+        model_class_num_ = output_attrs_[engine_->GetOutputIndex("cls")].dims[2];
 
         if (task_type_ == Task::YOLO_POSE) {
-            model_keypoints_num_ = static_cast<int>(output_attrs_[engine_->GetOutputIndex("ps1")].dims[1] / 3);
+            model_keypoints_num_ = 17; //static_cast<int>(output_attrs_[engine_->GetOutputIndex("ps")].dims[2] / 3);
         }
         return SUCCESS;
     }
@@ -144,17 +146,15 @@ namespace YOLO {
 
             if (yolo_type_ == Type::V8) {
                 if (task_type_ == Task::YOLO_POSE) {
-                    std::vector<std::string> pose_names = {"reg1", "cls1", "reg2", "cls2", "reg3", "cls3", "ps1", "ps2", "ps3"};
-                    if (pose_names.size() != output_num) return LOAD_MODEL_FAIL;
+                    if (3 != output_num) return LOAD_MODEL_FAIL;
 
-                    for (size_t i = 0; i < output_num; i++) {
-                        output_data[i] = (void *)infer_output_data[engine_->GetOutputIndex(pose_names[i])].first;
-                    }
+                    float* reg = (float *)infer_output_data[engine_->GetOutputIndex("reg")].first;
+                    float* cls = (float *)infer_output_data[engine_->GetOutputIndex("cls")].first;
+                    float* ps = (float *)infer_output_data[engine_->GetOutputIndex("ps")].first;
 
-                    yolov8::PostprocessSplit_POSE(
-                        (float **)output_data, detectiont_rects, pose_keypoints, 
-                        input_w, input_h, model_class_num_, model_keypoints_num_,
-                        0.25
+                    yolov8::Postprocess_POSE_float(
+                        reg, cls, ps, detectiont_rects, pose_keypoints, 8400, 
+                        input_w, input_h, model_class_num_, model_keypoints_num_, 0.25
                     );
 
                     for (auto& kp : pose_keypoints) {
@@ -186,39 +186,93 @@ namespace YOLO {
         } else {
             if (yolo_type_ == Type::V8) {
                 if (task_type_ == Task::YOLO_POSE) {
-                    int* numDetectionsOutput = (int *)infer_output_data[engine_->GetOutputIndex("NumDetections")].first;
-                    int* nmsClassesOutput = (int *)infer_output_data[engine_->GetOutputIndex("DetectionClasses")].first;
-                    float* nmsScoresOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionScores")].first;
-                    float* nmsBoxesOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionBoxes")].first;
-                    float* nmsKeyPointsOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionKeyPoints")].first;
+                    if (use_plugin_) {
+                        int* numDetectionsOutput = (int *)infer_output_data[engine_->GetOutputIndex("NumDetections")].first;
+                        int* nmsClassesOutput = (int *)infer_output_data[engine_->GetOutputIndex("DetectionClasses")].first;
+                        float* nmsScoresOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionScores")].first;
+                        float* nmsBoxesOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionBoxes")].first;
+                        float* nmsKeyPointsOutput = (float *)infer_output_data[engine_->GetOutputIndex("DetectionKeyPoints")].first;
+                    
+                        for (int i = 0; i < numDetectionsOutput[0]; i++) {
+                            yolo_result dr;
 
-                    for (int i = 0; i < numDetectionsOutput[0]; i++) {
-                        yolo_result dr;
+                            int classId = nmsClassesOutput[i];
+                            float conf = nmsScoresOutput[i];
+                            
+                            int xmin = int(nmsBoxesOutput[i * 4 + 0] * image_w / input_w + 0.5);
+                            int ymin = int(nmsBoxesOutput[i * 4 + 1] * image_w / input_w + 0.5);
+                            int xmax = int(nmsBoxesOutput[i * 4 + 2] * image_w / input_w + 0.5);
+                            int ymax = int(nmsBoxesOutput[i * 4 + 3] * image_w / input_w + 0.5);
 
-                        int classId = nmsClassesOutput[i];
-                        float conf = nmsScoresOutput[i];
-                        
-                        int xmin = int(nmsBoxesOutput[i * 4 + 0] * image_w / input_w + 0.5);
-                        int ymin = int(nmsBoxesOutput[i * 4 + 1] * image_w / input_w + 0.5);
-                        int xmax = int(nmsBoxesOutput[i * 4 + 2] * image_w / input_w + 0.5);
-                        int ymax = int(nmsBoxesOutput[i * 4 + 3] * image_w / input_w + 0.5);
+                            std::map<int, KeyPoint> kp_map;
+                            for (int k = 0; k < model_keypoints_num_; k++) {
+                                KeyPoint kp;
+                                kp.x = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 0] * image_w / input_w;
+                                kp.y = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 1] * image_w / input_w;
+                                kp.score = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 2];
+                                kp.id = k;
+                                kp_map[k] = kp;
+                            }
 
-                        std::map<int, KeyPoint> kp_map;
-                        for (int k = 0; k < model_keypoints_num_; k++) {
-                            KeyPoint kp;
-                            kp.x = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 0] * image_w / input_w;
-                            kp.y = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 1] * image_w / input_w;
-                            kp.score = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 2];
-                            kp.id = k;
-                            kp_map[k] = kp;
+                            dr.classId = classId;
+                            dr.score = conf;
+                            dr.box = Box{xmin, ymin, xmax, ymax};
+                            dr.keypoints = kp_map;
+
+                            resluts.push_back(dr);
                         }
+                    } else {
+                        float* regInput = (float *)infer_output_data[engine_->GetOutputIndex("reg")].first;
+                        float* clsInput = (float *)infer_output_data[engine_->GetOutputIndex("cls")].first;
+                        float* psInput = (float *)infer_output_data[engine_->GetOutputIndex("ps")].first;
 
-                        dr.classId = classId;
-                        dr.score = conf;
-                        dr.box = Box{xmin, ymin, xmax, ymax};
-                        dr.keypoints = kp_map;
+                        YOLOv8PoseLayerParameters param;
+                        int regSize = infer_output_data[engine_->GetOutputIndex("reg")].second;
+                        int clsSize = infer_output_data[engine_->GetOutputIndex("cls")].second; 
+                        int psSize = infer_output_data[engine_->GetOutputIndex("ps")].second;
 
-                        resluts.push_back(dr);
+                        int* numDetectionsOutput = (int *)malloc(sizeof(int));
+                        int* nmsClassesOutput    = (int *)malloc(sizeof(int) * param.numOutputBoxes);
+                        float* nmsScoresOutput     = (float *)malloc(sizeof(float) * param.numOutputBoxes);
+                        float* nmsBoxesOutput      = (float *)malloc(sizeof(float) * param.numOutputBoxes * 4);
+                        float* nmsKeyPointsOutput  = (float *)malloc(sizeof(float) * param.numOutputBoxes * 3 * param.numKeypoints);
+
+                        YOLOv8PoseLayerInference(
+                            param,
+                            regInput,  clsInput,  psInput,
+                            regSize, clsSize, psSize,
+                            numDetectionsOutput, nmsClassesOutput, nmsScoresOutput, 
+                            nmsBoxesOutput, nmsKeyPointsOutput
+                        );
+
+                        for (int i = 0; i < numDetectionsOutput[0]; i++) {
+                            yolo_result dr;
+
+                            int classId = nmsClassesOutput[i];
+                            float conf = nmsScoresOutput[i];
+                            
+                            int xmin = int(nmsBoxesOutput[i * 4 + 0] * image_w / input_w + 0.5);
+                            int ymin = int(nmsBoxesOutput[i * 4 + 1] * image_w / input_w + 0.5);
+                            int xmax = int(nmsBoxesOutput[i * 4 + 2] * image_w / input_w + 0.5);
+                            int ymax = int(nmsBoxesOutput[i * 4 + 3] * image_w / input_w + 0.5);
+
+                            std::map<int, KeyPoint> kp_map;
+                            for (int k = 0; k < model_keypoints_num_; k++) {
+                                KeyPoint kp;
+                                kp.x = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 0] * image_w / input_w;
+                                kp.y = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 1] * image_w / input_w;
+                                kp.score = nmsKeyPointsOutput[k * model_keypoints_num_ * 3 + i * 3 + 2];
+                                kp.id = k;
+                                kp_map[k] = kp;
+                            }
+
+                            dr.classId = classId;
+                            dr.score = conf;
+                            dr.box = Box{xmin, ymin, xmax, ymax};
+                            dr.keypoints = kp_map;
+
+                            resluts.push_back(dr);
+                        }
                     }
                 }
             }

@@ -19,9 +19,7 @@ namespace {
 
 pluginStatus_t YOLOv8PoseLayerInference(
     YOLOv8PoseLayerParameters param,
-    const void* reg1Input, const void* reg2Input, const void* reg3Input,
-    const void* cls1Input, const void* cls2Input, const void* cls3Input,
-    const void* ps1Input, const void* ps2Input, const void* ps3Input,
+    const void* regInput, const void* clsInput, const void* psInput,
     void* numDetectionsOutput, void* nmsClassesOutput, void* nmsScoresOutput, 
     void* nmsBoxesOutput, void* nmsKeyPointsOutput, void* workspace, cudaStream_t stream
 );
@@ -83,7 +81,6 @@ nvinfer1::DimsExprs YOLOv8PoseLayer::getOutputDimensions(
         out_dim.d[0] = inputs[0].d[0];
         out_dim.d[1] = exprBuilder.constant(mParam.numOutputBoxes);
         out_dim.d[2] = exprBuilder.constant(3 * mParam.numKeypoints);
-        // printf(">>4:[%d, %d, %d]\n", out_dim.d[0]->getConstantValue(), out_dim.d[1]->getConstantValue(), out_dim.d[2]->getConstantValue());
     }
     return out_dim;
 }
@@ -104,7 +101,6 @@ size_t YOLOv8PoseLayer::getSerializationSize() const noexcept {
 
 void YOLOv8PoseLayer::serialize(void* buffer) const noexcept {
     char *d = static_cast<char *>(buffer);
-
     write(d, mParam);
 }
 
@@ -112,34 +108,11 @@ void YOLOv8PoseLayer::configurePlugin(
     nvinfer1::DynamicPluginTensorDesc const* in, int32_t nbInput, 
     nvinfer1::DynamicPluginTensorDesc const* out, int32_t nbOutput
 ) noexcept {
-    assert(nbInput == 9);
+    assert(nbInput == 3);
 
     mParam.numClasses = in[1].desc.dims.d[1];
-    mParam.inputWidth = in[1].desc.dims.d[3] * mParam.minStride;
-    mParam.inputHeight = in[1].desc.dims.d[2] * mParam.minStride;
 
-    mParam.numAnchors = 0;
-    for (size_t i = 0; i < 3; i++) {
-        assert(in[i * 2].desc.dims.nbDims == 4);
-        mParam.numAnchors += in[i * 2].desc.dims.d[3];
-        if (i == 0)
-            mParam.headStart = mParam.numAnchors;
-        else if (i == 1)
-            mParam.headEnd = mParam.numAnchors;
-    }
-
-    mParam.reg1Size = in[0].desc.dims.d[1] * in[0].desc.dims.d[2] * in[0].desc.dims.d[3];
-    mParam.reg2Size = in[2].desc.dims.d[1] * in[2].desc.dims.d[2] * in[2].desc.dims.d[3];
-    mParam.reg3Size = in[4].desc.dims.d[1] * in[4].desc.dims.d[2] * in[4].desc.dims.d[3];
-
-    mParam.cls1Size = in[1].desc.dims.d[1] * in[1].desc.dims.d[2] * in[1].desc.dims.d[3];
-    mParam.cls2Size = in[3].desc.dims.d[1] * in[3].desc.dims.d[2] * in[3].desc.dims.d[3];
-    mParam.cls3Size = in[5].desc.dims.d[1] * in[5].desc.dims.d[2] * in[5].desc.dims.d[3];
-
-    mParam.ps1Size = in[6].desc.dims.d[1] * in[6].desc.dims.d[2] * in[6].desc.dims.d[3];
-    mParam.ps2Size = in[7].desc.dims.d[1] * in[7].desc.dims.d[2] * in[7].desc.dims.d[3];
-    mParam.ps3Size = in[8].desc.dims.d[1] * in[8].desc.dims.d[2] * in[8].desc.dims.d[3];
-
+    mParam.numAnchors = in[0].desc.dims.d[3];
 }
 
 bool YOLOv8PoseLayer::supportsFormatCombination(
@@ -173,11 +146,8 @@ size_t YOLOv8PoseLayer::getWorkspaceSize(
     nvinfer1::PluginTensorDesc const* inputs, int32_t nbInputs, 
     nvinfer1::PluginTensorDesc const* outputs, int32_t nbOutputs
 ) const noexcept {
-    int batchSize = inputs[1].dims.d[0];
-    int stride_1_anchors = inputs[0].dims.d[3];
-    int stride_2_anchors = inputs[2].dims.d[3];
-    int stride_3_anchors = inputs[4].dims.d[3];
-    int numAnchors = stride_1_anchors + stride_2_anchors + stride_3_anchors;
+    int batchSize = inputs[0].dims.d[0];
+    int numAnchors = inputs[0].dims.d[3];
     
     return YOLOv8PoseLayerWorkspaceSize(batchSize, numAnchors);
 }
@@ -189,15 +159,9 @@ int32_t YOLOv8PoseLayer::enqueue(
     try {
         mParam.batchSize = inputDesc[0].dims.d[0];
 
-        const void* const reg1Input = inputs[0];
-        const void* const cls1Input = inputs[1];
-        const void* const reg2Input = inputs[2];
-        const void* const cls2Input = inputs[3];
-        const void* const reg3Input = inputs[4];
-        const void* const cls3Input = inputs[5];
-        const void* const ps1Input  = inputs[6];
-        const void* const ps2Input  = inputs[7];
-        const void* const ps3Input  = inputs[8];
+        const void* const regInput = inputs[0];
+        const void* const clsInput = inputs[1];
+        const void* const psInput  = inputs[2];
 
         void* numDetectionsOutput = outputs[0];
         void* nmsClassesOutput    = outputs[1];
@@ -207,9 +171,7 @@ int32_t YOLOv8PoseLayer::enqueue(
 
         return YOLOv8PoseLayerInference(
             mParam,
-            reg1Input, reg2Input, reg3Input,
-            cls1Input, cls2Input, cls3Input,
-            ps1Input, ps2Input, ps3Input,
+            regInput, clsInput, psInput,
             numDetectionsOutput, nmsClassesOutput, nmsScoresOutput, 
             nmsBoxesOutput, nmsKeyPointsOutput, workspace, stream
         );
@@ -222,6 +184,8 @@ int32_t YOLOv8PoseLayer::enqueue(
 
 YOLOv8PoseLayerPluginCreator::YOLOv8PoseLayerPluginCreator() noexcept {
     mPluginAttributes.clear();
+    mPluginAttributes.emplace_back(nvinfer1::PluginField("input_width", nullptr, nvinfer1::PluginFieldType::kINT32, 1));
+    mPluginAttributes.emplace_back(nvinfer1::PluginField("input_height", nullptr, nvinfer1::PluginFieldType::kINT32, 1));
     mPluginAttributes.emplace_back(nvinfer1::PluginField("max_output_boxes", nullptr, nvinfer1::PluginFieldType::kINT32, 1));
     mPluginAttributes.emplace_back(nvinfer1::PluginField("min_stride", nullptr, nvinfer1::PluginFieldType::kINT32, 1));
     mPluginAttributes.emplace_back(nvinfer1::PluginField("num_keypoints", nullptr, nvinfer1::PluginFieldType::kINT32, 1));
@@ -242,6 +206,14 @@ nvinfer1::IPluginV2DynamicExt* YOLOv8PoseLayerPluginCreator::createPlugin(
 
         for (int i = 0; i < fc->nbFields; i++) {
             const char* attrName = fields[i].name;
+            if (!strcmp(attrName, "input_width")) {
+                assert(fields[i].type == nvinfer1::PluginFieldType::kINT32);
+                mParam.inputWidth= *(static_cast<const int *>(fields[i].data));
+            }
+            if (!strcmp(attrName, "input_height")) {
+                assert(fields[i].type == nvinfer1::PluginFieldType::kINT32);
+                mParam.inputHeight= *(static_cast<const int *>(fields[i].data));
+            }
             if (!strcmp(attrName, "max_output_boxes")) {
                 assert(fields[i].type == nvinfer1::PluginFieldType::kINT32);
                 mParam.numOutputBoxes = *(static_cast<const int *>(fields[i].data));
