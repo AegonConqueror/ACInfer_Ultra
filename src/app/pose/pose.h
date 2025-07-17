@@ -2,19 +2,16 @@
 #define ACINFER_ULTRA_POSE_H
 
 #include <memory>
+#include <opencv2/opencv.hpp>
+
 #include <types/error.h>
 
-#include "yolo/yolov8_type.h"
-
-typedef struct PosePoint {
-    float x, y;
-    float score;
-} PosePoint;
+#include "yolo/yolo_type.h"
 
 namespace Pose {
     class Model {
     public:
-        virtual error_e Run(const cv::Mat& frame, std::vector<yolov8_result>& det_results) = 0;
+        virtual error_e Run(const cv::Mat& frame, std::vector<yolo_result>& det_results) = 0;
     };
 
     std::shared_ptr<Model> CreateInferModel(

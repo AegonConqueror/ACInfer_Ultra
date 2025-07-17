@@ -93,7 +93,7 @@ namespace YOLO {
         model_class_num_ = output_attrs_[engine_->GetOutputIndex("cls")].dims[2];
 
         if (task_type_ == Task::YOLO_POSE) {
-            model_keypoints_num_ = 17; //static_cast<int>(output_attrs_[engine_->GetOutputIndex("ps")].dims[2] / 3);
+            model_keypoints_num_ = static_cast<int>(output_attrs_[engine_->GetOutputIndex("DetectionKeyPoints")].dims[2] / 3);
         }
         return SUCCESS;
     }

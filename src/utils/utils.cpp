@@ -66,9 +66,9 @@ namespace iLog {
         vsnprintf(buffer + n, sizeof(buffer) - n, fmt, vl);
         fprintf(stdout, "%s\n", buffer);
 
-        if (level == LogLevel::Fatal or level == LogLevel::Error) {
-            abort();
-        }
+        // if (level == LogLevel::Fatal or level == LogLevel::Error) {
+        //     abort();
+        // }
     }
 
 } // namespace iLog
@@ -85,21 +85,6 @@ namespace iTools {
             }
         }
         return result;
-    }
-    
-    float* halfToFloat(void* pred_half, std::vector<int> shape) {
-        size_t size = 1;
-        for (auto dim : shape){
-            size = size * dim;
-        }
-        
-        cv::Mat float16MatFromHalf(1, size, CV_16F, pred_half);
-        cv::Mat float32MatBack;
-        float16MatFromHalf.convertTo(float32MatBack, CV_32F);
-
-        float* pred_float = new float[size];
-        memcpy(pred_float, float32MatBack.ptr<float>(), size * sizeof(float));
-        return pred_float;
     }
 
 } // namespace iTools
@@ -227,6 +212,32 @@ namespace iFile {
         binFile.read(static_cast<char*>(inputBuff), binFileBufferLen);
         binFile.close();
         fileSize = binFileBufferLen;
+    }
+
+    std::vector<std::vector<float>> readLabelFile(const std::string& file_path) {
+        std::vector<std::vector<float>> data;
+        std::ifstream infile(file_path);
+        
+        if (!infile.is_open()) {
+            std::cerr << "Failed to open file: " << file_path << std::endl;
+            return data;
+        }
+
+        std::string line;
+        while (std::getline(infile, line)) {
+            std::istringstream iss(line);
+            std::vector<float> row;
+            float value;
+            while (iss >> value) {
+                row.push_back(value);
+            }
+            if (!row.empty()) {
+                data.push_back(row);
+            }
+        }
+
+        infile.close();
+        return data;
     }
 
     bool save_file(const std::string& file, const void* data, size_t length, bool mk_dirs){

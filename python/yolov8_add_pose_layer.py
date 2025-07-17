@@ -7,8 +7,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-split_onnx_file = "./onnx/modified/yolov8s_silu_pose_split.onnx"
-dst_onnx_file = "./onnx/modified/yolov8s_silu_pose_plugin.onnx"
+split_onnx_file = "./onnx/modified/yolo11s_silu_pose_split.onnx"
+dst_onnx_file = "./onnx/modified/yolo11s_silu_pose_plugin.onnx"
 
 input_width = 640
 input_height = 640

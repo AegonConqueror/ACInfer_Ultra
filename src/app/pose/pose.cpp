@@ -4,18 +4,14 @@
 
 #include <unordered_set>
 
-void key_points(cv::Mat& img, const std::map<int, KeyPoint>& keypoints) {
-    for (const auto& keyP : keypoints) {
-        cv::circle(img, cv::Point(keyP.second.x, keyP.second.y), 2, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-    }
-}
 typedef struct AffineImg {
     cv::Mat src_img;
     cv::Mat timg;
     cv::Rect2f padding_roi;
 } AffineImg;
 
-std::unordered_set<int> choose_index{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 83, 85, 87, 89};
+// std::unordered_set<int> choose_index{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 83, 85, 87, 89};
+std::unordered_set<int> choose_index{0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 83, 85, 87, 89};
 
 void dw_postprocess(
     const float* simcc_x,
@@ -136,14 +132,11 @@ void bbox_xyxy2cs(const cv::Rect& bbox, cv::Point2f& center, cv::Point2f& scale,
     int y1 = bbox.y;
     int x2 = bbox.x + bbox.width;
     int y2 = bbox.y + bbox.height;
-    // LOG_INFO("x1 %d, y1 %d, x2 %d, y2 %d", x1, y1, x2, y2);
 
     float cx = (x1 + x2) * 0.5f;
     float cy = (y1 + y2) * 0.5f;
     float w = (x2 - x1) * padding;
     float h = (y2 - y1) * padding;
-
-    // LOG_INFO("cx %f, cy %f, w %f, h %f", cx, cy, w, h);
 
     center = cv::Point2f(cx, cy);
     scale = cv::Point2f(w, h);
@@ -191,15 +184,11 @@ namespace Pose {
     public:
         error_e Load(const std::string& model_path);
 
-        virtual error_e Run(const cv::Mat &frame, std::vector<yolov8_result>& det_results) override;
+        virtual error_e Run(const cv::Mat& frame, std::vector<yolo_result>& det_results) override;
     private:
-        error_e preprocess(
-            const cv::Mat& src_frame, 
-            const std::vector<yolov8_result>& det_results, 
-            std::vector<AffineImg>& input_imgs
-        );
+        error_e preprocess(const cv::Mat& src_frame, const std::vector<yolo_result>& dets, std::vector<AffineImg>& input_imgs);
         error_e inference(InferenceData& output_data);
-        error_e postprocess(const AffineImg& affine, std::map<int, KeyPoint>& pose_points);
+        error_e postprocess(const AffineImg& affine, KeyPoints& keypoints);
 
     private:
         std::shared_ptr<ACEngine>   engine_;
@@ -222,32 +211,30 @@ namespace Pose {
         return SUCCESS;
     }
 
-    error_e ModelImpl::preprocess(
-        const cv::Mat& src_frame, 
-        const std::vector<yolov8_result>& det_results, 
-        std::vector<AffineImg>& input_imgs
-    ) {
+    error_e ModelImpl::preprocess(const cv::Mat& src_frame, const std::vector<yolo_result>& dets, std::vector<AffineImg>& input_imgs) {
         int input_w     = input_attr_.dims[3];
         int input_h     = input_attr_.dims[2];
         int image_w     = src_frame.cols;
         int image_h     = src_frame.rows;
 
-        for (size_t i = 0; i < det_results.size(); i++) {
-            auto box = det_results[i].box;
+        for (size_t i = 0; i < dets.size(); i++) {
+
+            auto det_box = dets[i].box;
+            cv::Rect box{det_box.left, det_box.top, det_box.right - det_box.left, det_box.bottom - det_box.top};
 
             cv::Point2f center;
             cv::Point2f scale;
-            // bbox_xyxy2cs(det_results[i].box, center, scale);
+            bbox_xyxy2cs(box, center, scale);
 
             cv::Mat resized_img, rgb_img, normalized_img;
 
-            // resized_img = top_down_affine(input_w, input_h, scale, center, src_frame);
+            resized_img = top_down_affine(input_w, input_h, scale, center, src_frame);
 
             cv::Mat item_img;
             cv::Rect2f padding_roi;
             padding_roi_img(src_frame, box, item_img, padding_roi);
 
-            cv::resize(item_img, resized_img, cv::Size(input_w, input_h));
+            // cv::resize(item_img, resized_img, cv::Size(input_w, input_h));
             cv::cvtColor(resized_img, rgb_img, cv::COLOR_BGR2RGB);
 
             rgb_img.convertTo(normalized_img, CV_32F);
@@ -270,7 +257,7 @@ namespace Pose {
         return SUCCESS;
     }
 
-    error_e ModelImpl::postprocess(const AffineImg& affine, std::map<int, KeyPoint>& pose_points) {
+    error_e ModelImpl::postprocess(const AffineImg& affine, KeyPoints& keypoints) {
         int input_w     = input_attr_.dims[3];
         int input_h     = input_attr_.dims[2];
         int image_w     = affine.src_img.cols;
@@ -294,9 +281,9 @@ namespace Pose {
             output_data[i] = (void *)infer_output_data[i].first;
         }
 
-        dw_postprocess((float *)output_data[0], (float *)output_data[1], pose_points);
+        dw_postprocess((float *)output_data[0], (float *)output_data[1], keypoints);
 
-        for (auto& point : pose_points) {
+        for (auto& point : keypoints) {
             point.second.x *= radio_w;
             point.second.y *= radio_h;
         }
@@ -304,7 +291,7 @@ namespace Pose {
         return SUCCESS;
     }
 
-    error_e ModelImpl::Run(const cv::Mat& frame, std::vector<yolov8_result>& det_results) {
+    error_e ModelImpl::Run(const cv::Mat& frame, std::vector<yolo_result>& det_results) {
         int input_w     = input_attr_.dims[3];
         int input_h     = input_attr_.dims[2];
         int image_w     = frame.cols;
@@ -346,17 +333,31 @@ namespace Pose {
 
             engine_->BindingInput(infer_input_data);
 
-            std::map<int, KeyPoint> item_points;
+            KeyPoints item_points;
             postprocess(input_imgs[i], item_points);
 
+            auto i_det_box = det_results[i].box;
 
             for (auto& point : item_points) {
                 point.second.x += input_imgs[i].padding_roi.x;
                 point.second.y += input_imgs[i].padding_roi.y;
+
+                if (
+                    point.second.x < i_det_box.left || 
+                    point.second.y < i_det_box.top || 
+                    point.second.x > i_det_box.right ||
+                    point.second.y > i_det_box.bottom
+                ) {
+                    point.second.x = 0;
+                    point.second.y = 0;
+                    point.second.score = 0;
+                }
             }
 
-            key_points(testMat, item_points);
-            cv::imwrite("./output/test.jpg", testMat);
+            det_results[i].keypoints = item_points;
+            // keypoints.push_back(item_points);
+            // key_points(testMat, item_points);
+            // cv::imwrite("./output/dwpose/pose.jpg", testMat);
         }
         
         auto time_end= iTime::timestamp_now();

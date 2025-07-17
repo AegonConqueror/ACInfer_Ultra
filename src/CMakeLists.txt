@@ -94,4 +94,11 @@ if(USE_TENSORRT)
     target_link_libraries(yolo_test_trt PRIVATE yolo_inference)
     target_link_libraries(yolo_test_trt PRIVATE -Wl,--no-as-needed yolov8PoseLayerPlugin)
     set_target_properties(yolo_test_trt PROPERTIES CUDA_ARCHITECTURES "61;70;75")
+
+    add_executable(
+        pose_labels_prepare
+        ${CMAKE_CURRENT_SOURCE_DIR}/app/pose/pose.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/demo/pose_labels_prepare.cpp
+    )
+    target_link_libraries(pose_labels_prepare PUBLIC inference_engine)
 endif(USE_TENSORRT)

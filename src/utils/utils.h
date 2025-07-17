@@ -49,15 +49,14 @@ namespace iTools {
 
     std::string vector_shape_string(const std::vector<int64_t>& shape);
 
-    /**
-     * ! 需要释放内存防止内存泄漏
-     */
-    float* halfToFloat(void* pred_half, std::vector<int> shape);
-
 } // namespace iTools
 
 
 namespace iFile {
+
+    bool mkdir(const std::string& path);
+
+    bool mkdirs(const std::string& path);
     
     /**
      * @brief  从给定路径中提取文件名
@@ -83,6 +82,8 @@ namespace iFile {
     std::vector<std::string> find_files(const std::string& directory);
     
     void read_bin(const std::string &fileName, void *&inputBuff, uint32_t &fileSize);
+
+    std::vector<std::vector<float>> readLabelFile(const std::string& file_path);
 
     /**
      * @brief 保存文件
