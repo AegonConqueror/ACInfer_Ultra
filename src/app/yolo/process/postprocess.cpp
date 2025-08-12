@@ -195,4 +195,96 @@ namespace yolov8 {
             }
         }
     }
+
+    void Postprocess_DET_float(
+        float* reg, float* cls, std::vector<float>& det_rects,
+        int anchors, int input_w, int input_h, int class_num,
+        float conf_thres, float nms_thres
+    ) {
+        static auto meshgrid = GenerateMeshgrid(input_w, input_h);
+
+        int grid_index = -2;
+
+        float cls_max = 0;
+        int cls_index = 0;
+
+        std::vector<Yolov8Rect> det_results;
+
+        for (int i = 0; i < anchors; i++) {
+            grid_index += 2;
+            for (int cl = 0; cl < class_num; cl++) {
+                float cls_val = cls[cl * anchors + i];
+                if (0 == cl) {
+                    cls_max = cls_val;
+                    cls_index = cl;
+                } else {
+                    if (cls_val > cls_max) {
+                        cls_max = cls_val;
+                        cls_index = cl;
+                    }
+                }
+
+                if (cls_max > conf_thres) {
+                    Yolov8Rect temp;
+
+                    int head_index = (i < 6400) ? 0 : (i < 8000) ? 1 : 2;
+
+                    float xmin = (meshgrid[grid_index + 0] - reg[0 * anchors + i]) * strides[head_index];
+                    float ymin = (meshgrid[grid_index + 1] - reg[1 * anchors + i]) * strides[head_index];
+                    float xmax = (meshgrid[grid_index + 0] + reg[2 * anchors + i]) * strides[head_index];
+                    float ymax = (meshgrid[grid_index + 1] + reg[3 * anchors + i]) * strides[head_index];
+
+                    xmin = xmin > 0 ? xmin : 0;
+                    ymin = ymin > 0 ? ymin : 0;
+                    xmax = xmax < input_w ? xmax : input_w;
+                    ymax = ymax < input_h ? ymax : input_h;
+
+                    if (xmin >= 0 && ymin >= 0 && xmax <= input_w && ymax <= input_h) {
+                        temp.xmin = xmin / input_w;
+                        temp.ymin = ymin / input_h;
+                        temp.xmax = xmax / input_w;
+                        temp.ymax = ymax / input_h;
+                        temp.classId = cls_index;
+                        temp.score = cls_max;
+                        det_results.push_back(temp);
+                    }
+                }
+            }
+        }
+
+        std::sort(
+            det_results.begin(), det_results.end(),
+            [](Yolov8Rect &Rect1, Yolov8Rect &Rect2) -> bool
+            { return (Rect1.score > Rect2.score); }
+        );
+
+        for (int i = 0; i < det_results.size(); ++i) {
+            float xmin1 = det_results[i].xmin;
+            float ymin1 = det_results[i].ymin;
+            float xmax1 = det_results[i].xmax;
+            float ymax1 = det_results[i].ymax;
+            int classId = det_results[i].classId;
+            float score = det_results[i].score;
+
+            if (classId != -1) {
+                det_rects.push_back(float(classId));
+                det_rects.push_back(float(score));
+                det_rects.push_back(float(xmin1));
+                det_rects.push_back(float(ymin1));
+                det_rects.push_back(float(xmax1));
+                det_rects.push_back(float(ymax1));
+
+                for (int j = i + 1; j < det_results.size(); ++j) {
+                    float xmin2 = det_results[j].xmin;
+                    float ymin2 = det_results[j].ymin;
+                    float xmax2 = det_results[j].xmax;
+                    float ymax2 = det_results[j].ymax;
+                    float iou = IOU(xmin1, ymin1, xmax1, ymax1, xmin2, ymin2, xmax2, ymax2);
+                    if (iou > nms_thres) {
+                        det_results[j].classId = -1;
+                    }
+                }
+            }
+        }
+    }
 } // namespace yolov8

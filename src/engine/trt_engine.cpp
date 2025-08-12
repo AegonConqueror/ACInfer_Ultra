@@ -30,6 +30,58 @@ public:
 };
 static Logger gLogger;
 
+typedef struct trt_attr{
+    std::string name;
+    std::string type;
+    int64_t     index;
+    int64_t     n_elems;
+    std::vector<int64_t> dims;
+} ac_trt_attr;
+
+std::string data_type_string(nvinfer1::DataType dt){
+    switch(dt){
+        case nvinfer1::DataType::kFLOAT:    return "Float";
+        case nvinfer1::DataType::kHALF:     return "Float16";
+        case nvinfer1::DataType::kINT32:    return "UInt8";
+        case nvinfer1::DataType::kUINT8:    return "Int8";
+        default: return "Unknow";
+    }
+}
+
+TRT::DataType convert_trt_datatype(nvinfer1::DataType dt){
+    switch(dt){
+        case nvinfer1::DataType::kFLOAT : return TRT::DataType::Float;
+        case nvinfer1::DataType::kHALF  : return TRT::DataType::Float16;
+        case nvinfer1::DataType::kINT32 : return TRT::DataType::Int32;
+        case nvinfer1::DataType::kUINT8 : return TRT::DataType::UInt8;
+        default:
+            LOG_ERROR("Unsupport data type %d", dt);
+            return TRT::DataType::Float;
+    }
+}
+
+ac_trt_attr engine_tensor_attr_encode(
+    int index,
+    nvinfer1::Dims nvDims,
+    nvinfer1::DataType nvType,
+    const char* nodeName 
+) {
+    ac_trt_attr attr;
+
+    attr.index = index;
+    attr.name = nodeName;
+
+    auto n_dims = nvDims.nbDims;
+    int n_elems = 1;
+    for (int i = 0; i < n_dims; ++i) {
+        attr.dims.push_back(nvDims.d[i]);
+        n_elems *= nvDims.d[i];
+    }
+    attr.n_elems = n_elems;
+    attr.type = data_type_string(nvType);
+    return attr;
+}
+
 class EngineContext {
 public:
     ~EngineContext() { destroy(); }
@@ -85,48 +137,6 @@ public:
     std::shared_ptr<nvinfer1::IRuntime> runtime_ = nullptr;
 };
 
-static ac_tensor_type_e engine_type_convert(TRT::DataType type) {
-    switch (type)
-    {
-    case TRT::DataType::Float:
-        return AC_TENSOR_FLOAT;
-    case TRT::DataType::Float16:
-        return AC_TENSOR_FLOAT16;
-    case TRT::DataType::UInt8:
-        return AC_TENSOR_UINT8;
-    case TRT::DataType::Int32:
-        return AC_TENSOR_INT32;
-    default:
-        LOG_ERROR("unsupported rknn type: %d\n", type);
-        exit(1);
-    }
-}
-
-static ac_engine_attr engine_tensor_attr_encode(
-    const int index,
-    const char *tensor_name,
-    const std::shared_ptr<TRT::Tensor> &trt_tensor
-) {
-    ac_engine_attr shape;
-
-    shape.index = index;
-    shape.name = tensor_name;
-    shape.n_dims = trt_tensor->ndims();
-    for (int i = 0; i < trt_tensor->ndims(); ++i) {
-        shape.dims[i] = trt_tensor->dims()[i];
-    }
-    shape.n_elems = trt_tensor->numel();
-    shape.size = trt_tensor->numel();
-
-    shape.qnt_zp = 0;
-    shape.qnt_scale = .0f;
-
-    shape.type = engine_type_convert(trt_tensor->type());
-    shape.layout = AC_TENSOR_NCHW;
-
-    return shape;
-}
-
 class TRTEngine : public ACEngine {
 public:
     TRTEngine() {};
@@ -164,44 +174,11 @@ private:
     uint32_t input_num_;
     uint32_t output_num_;
 
-    std::vector<ac_engine_attr> input_attrs_;
-    std::vector<ac_engine_attr> output_attrs_;
+    std::vector<ac_trt_attr> input_attrs_;
+    std::vector<ac_trt_attr> output_attrs_;
 
     std::unordered_map<std::string, uint32_t> name_index_map_;
 };
-
-static TRT::DataType convert_trt_datatype(nvinfer1::DataType dt){
-    switch(dt){
-        case nvinfer1::DataType::kFLOAT : return TRT::DataType::Float;
-        case nvinfer1::DataType::kHALF  : return TRT::DataType::Float16;
-        case nvinfer1::DataType::kINT32 : return TRT::DataType::Int32;
-        case nvinfer1::DataType::kUINT8 : return TRT::DataType::UInt8;
-        default:
-            LOG_ERROR("Unsupport data type %d", dt);
-            return TRT::DataType::Float;
-    }
-}
-
-inline std::string data_type_string(ac_tensor_type_e dt){
-    switch(dt){
-        case AC_TENSOR_FLOAT:   return "Float";
-        case AC_TENSOR_FLOAT16: return "Float16";
-        case AC_TENSOR_UINT8:   return "UInt8";
-        case AC_TENSOR_INT8:    return "Int8";
-        case AC_TENSOR_INT16:   return "Int16";
-        case AC_TENSOR_INT32:   return "Int32";
-        case AC_TENSOR_INT64:   return "Int64";
-        default: return "Unknow";
-    }
-}
-
-inline std::string data_format_string(ac_tensor_fmt_e dt){
-    switch(dt){
-        case AC_TENSOR_NCHW:   return "NCHW";
-        case AC_TENSOR_NHWC:   return "NHWC";
-        default: return "Unknow";
-    }
-}
 
 void TRTEngine::destory() {
     int old_device = 0;
@@ -215,42 +192,38 @@ void TRTEngine::destory() {
     checkCudaRuntime(cudaSetDevice(old_device));
 }
 
-int TRTEngine::get_max_batch_size() {
-    assert(this->context_ != nullptr);
-    return this->context_->engine_->getMaxBatchSize();
-}
-
 void TRTEngine::Print() {
     LOG_INFO("****************************************************************************");
-    LOG_INFO("Infer %p detail", this);
+    LOG_INFO("Engine %p detail", this);
     LOG_INFO("\tBase device: %s", iCUDA::device_description().c_str());
     LOG_INFO("\tMax Batch Size: %d", this->get_max_batch_size());
     LOG_INFO("\tInputs: %d", input_num_);
-    for (const auto &attr : input_attrs_) {
-        std::vector<int64_t> shapes_(attr.dims, attr.dims + attr.n_dims);
+    for (const auto& attr : input_attrs_) {
         LOG_INFO(
-            "\t\t%d.%s : shape {%s}, %s, fmt %s, size %d", 
+            "\t\t%d.%s : shape {%s}, %s, fmt NCHW, size %d", 
             attr.index, attr.name.c_str(), 
-            iTools::vector_shape_string(shapes_).c_str(), 
-            data_type_string(attr.type).c_str(),
-            data_format_string(attr.layout).c_str(),
-            attr.size
+            iTools::vector_shape_string(attr.dims).c_str(), 
+            attr.type.c_str(),
+            attr.n_elems
         );
     }
 
     LOG_INFO("\tOutputs: %d", output_num_);
-    for (const auto &attr : output_attrs_) {
-        std::vector<int64_t> shapes_(attr.dims, attr.dims + attr.n_dims);
+    for (const auto& attr : output_attrs_) {
         LOG_INFO(
-            "\t\t%d.%s : shape {%s}, %s, fmt %s, size %d", 
+            "\t\t%d.%s : shape {%s}, %s, fmt NCHW, size %d", 
             attr.index, attr.name.c_str(), 
-            iTools::vector_shape_string(shapes_).c_str(), 
-            data_type_string(attr.type).c_str(),
-            data_format_string(attr.layout).c_str(),
-            attr.size
+            iTools::vector_shape_string(attr.dims).c_str(), 
+            attr.type.c_str(),
+            attr.n_elems
         );
     }
     LOG_INFO("****************************************************************************");
+}
+
+int TRTEngine::get_max_batch_size() {
+    assert(this->context_ != nullptr);
+    return this->context_->engine_->getMaxBatchSize();
 }
 
 void TRTEngine::synchronize() {
@@ -285,7 +258,7 @@ error_e TRTEngine::create(const std::string &file) {
     for (int i = 0; i < nbBindings; ++i) {
         auto dims                   = context_->engine_->getBindingDimensions(i);
         auto type                   = context_->engine_->getBindingDataType(i);
-        const char *bindingName     = context_->engine_->getBindingName(i);
+        const char* bindingName     = context_->engine_->getBindingName(i);
 
         dims.d[0] = max_batchsize;
 
@@ -293,10 +266,10 @@ error_e TRTEngine::create(const std::string &file) {
         newTensor->set_stream(context_->stream_);
         if (context_->engine_->bindingIsInput(i)){
             inputs_.push_back(newTensor);
-            input_attrs_.push_back(engine_tensor_attr_encode(i, bindingName, newTensor));
+            input_attrs_.push_back(engine_tensor_attr_encode(i, dims, type, bindingName));
         }else{
             outputs_.push_back(newTensor);
-            output_attrs_.push_back(engine_tensor_attr_encode(i, bindingName, newTensor));
+            output_attrs_.push_back(engine_tensor_attr_encode(i, dims, type, bindingName));
         }
         orderdBlobs_.push_back(newTensor);
     }
@@ -312,11 +285,27 @@ error_e TRTEngine::create(const std::string &file) {
 }
 
 const ac_engine_attrs TRTEngine::GetInputAttrs() {
-    return input_attrs_;
+    ac_engine_attrs attrs;
+    for (const auto& attr : input_attrs_) {
+        ac_engine_attr attr_;
+        attr_.n_dims = attr.dims.size();
+        attr_.dims = attr.dims;
+        attrs.push_back(attr_);
+    }
+    
+    return attrs;
 }
 
 const ac_engine_attrs TRTEngine::GetOutputAttrs() {
-    return output_attrs_;
+    ac_engine_attrs attrs;
+    for (const auto& attr : output_attrs_) {
+        ac_engine_attr attr_;
+        attr_.n_dims = attr.dims.size();
+        attr_.dims = attr.dims;
+        attrs.push_back(attr_);
+    }
+    
+    return attrs;
 }
 
 int TRTEngine::GetOutputIndex(const std::string name) {

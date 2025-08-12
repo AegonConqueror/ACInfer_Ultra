@@ -2,7 +2,7 @@
 .DS_Store
 build
 cmake/*
-!cmake/
+!cmake/.gitkeep
 .vscode
 3rdparty/*
 !3rdparty/.gitkeep
@@ -20,3 +20,4 @@ src/demo/*
 engine/*
 *.sh
 python/*
+labels/*

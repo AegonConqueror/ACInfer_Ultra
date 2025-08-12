@@ -7,7 +7,8 @@
 typedef struct AffineImg {
     cv::Mat src_img;
     cv::Mat timg;
-    cv::Rect2f padding_roi;
+    cv::Point2f center;
+    cv::Point2f scale;
 } AffineImg;
 
 // std::unordered_set<int> choose_index{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 83, 85, 87, 89};
@@ -21,8 +22,8 @@ void dw_postprocess(
 ) {
     int N = 1;
     int K = 133;
-    int Wx = 576;
-    int Wy = 768;
+    int Wx = 384; // 576
+    int Wy = 512; // 768
 
     int index = 0;
     for (int n = 0; n < N; n++) {
@@ -229,12 +230,6 @@ namespace Pose {
             cv::Mat resized_img, rgb_img, normalized_img;
 
             resized_img = top_down_affine(input_w, input_h, scale, center, src_frame);
-
-            cv::Mat item_img;
-            cv::Rect2f padding_roi;
-            padding_roi_img(src_frame, box, item_img, padding_roi);
-
-            // cv::resize(item_img, resized_img, cv::Size(input_w, input_h));
             cv::cvtColor(resized_img, rgb_img, cv::COLOR_BGR2RGB);
 
             rgb_img.convertTo(normalized_img, CV_32F);
@@ -243,9 +238,10 @@ namespace Pose {
             normalized_img = (normalized_img - mean) / std;
 
             AffineImg affine;
-            affine.src_img = item_img;
+            affine.src_img = resized_img;
             affine.timg = normalized_img;
-            affine.padding_roi = padding_roi;
+            affine.center = center;
+            affine.scale = scale;
             input_imgs.push_back(affine);
         }
 
@@ -284,8 +280,8 @@ namespace Pose {
         dw_postprocess((float *)output_data[0], (float *)output_data[1], keypoints);
 
         for (auto& point : keypoints) {
-            point.second.x *= radio_w;
-            point.second.y *= radio_h;
+            point.second.x = point.second.x / input_w * affine.scale.x + affine.center.x - affine.scale.x / 2.0f;
+            point.second.y = point.second.y / input_h * affine.scale.y + affine.center.y - affine.scale.y / 2.0f;
         }
 
         return SUCCESS;
@@ -339,9 +335,6 @@ namespace Pose {
             auto i_det_box = det_results[i].box;
 
             for (auto& point : item_points) {
-                point.second.x += input_imgs[i].padding_roi.x;
-                point.second.y += input_imgs[i].padding_roi.y;
-
                 if (
                     point.second.x < i_det_box.left || 
                     point.second.y < i_det_box.top || 
@@ -355,9 +348,6 @@ namespace Pose {
             }
 
             det_results[i].keypoints = item_points;
-            // keypoints.push_back(item_points);
-            // key_points(testMat, item_points);
-            // cv::imwrite("./output/dwpose/pose.jpg", testMat);
         }
         
         auto time_end= iTime::timestamp_now();

@@ -93,7 +93,9 @@ namespace YOLO {
         model_class_num_ = output_attrs_[engine_->GetOutputIndex("cls")].dims[2];
 
         if (task_type_ == Task::YOLO_POSE) {
-            model_keypoints_num_ = static_cast<int>(output_attrs_[engine_->GetOutputIndex("DetectionKeyPoints")].dims[2] / 3);
+            model_keypoints_num_ = decode_type_ == DecodeMethod::GPU ? 
+                static_cast<int>(output_attrs_[engine_->GetOutputIndex("DetectionKeyPoints")].dims[2] / 3) :
+                static_cast<int>(output_attrs_[engine_->GetOutputIndex("ps")].dims[2] / 3);
         }
         return SUCCESS;
     }
@@ -142,6 +144,7 @@ namespace YOLO {
             void* output_data[output_num];
 
             std::vector<float> detectiont_rects;
+
             KeyPointsArray pose_keypoints;
 
             if (yolo_type_ == Type::V8) {
@@ -163,6 +166,17 @@ namespace YOLO {
                             kp_item.second.y = kp_item.second.y * float(image_h);
                         }
                     }
+                } 
+                else if (task_type_ == Task::YOLO_DET) {
+                    if (2 != output_num) return LOAD_MODEL_FAIL;
+
+                    float* reg = (float *)infer_output_data[engine_->GetOutputIndex("reg")].first;
+                    float* cls = (float *)infer_output_data[engine_->GetOutputIndex("cls")].first;
+
+                    yolov8::Postprocess_DET_float(
+                        reg, cls, detectiont_rects, 8400, 
+                        input_w, input_h, model_class_num_, 0.25
+                    );
                 }
 
                 for (int i = 0; i < detectiont_rects.size(); i += 6) {
@@ -224,15 +238,15 @@ namespace YOLO {
                     } else {
                         float* regInput = (float *)infer_output_data[engine_->GetOutputIndex("reg")].first;
                         float* clsInput = (float *)infer_output_data[engine_->GetOutputIndex("cls")].first;
-                        float* psInput = (float *)infer_output_data[engine_->GetOutputIndex("ps")].first;
-
+                        float* psInput  = (float *)infer_output_data[engine_->GetOutputIndex("ps")].first;
+                        
                         YOLOv8PoseLayerParameters param;
                         int regSize = infer_output_data[engine_->GetOutputIndex("reg")].second;
                         int clsSize = infer_output_data[engine_->GetOutputIndex("cls")].second; 
                         int psSize = infer_output_data[engine_->GetOutputIndex("ps")].second;
 
-                        int* numDetectionsOutput = (int *)malloc(sizeof(int));
-                        int* nmsClassesOutput    = (int *)malloc(sizeof(int) * param.numOutputBoxes);
+                        int* numDetectionsOutput   = (int *)malloc(sizeof(int));
+                        int* nmsClassesOutput      = (int *)malloc(sizeof(int) * param.numOutputBoxes);
                         float* nmsScoresOutput     = (float *)malloc(sizeof(float) * param.numOutputBoxes);
                         float* nmsBoxesOutput      = (float *)malloc(sizeof(float) * param.numOutputBoxes * 4);
                         float* nmsKeyPointsOutput  = (float *)malloc(sizeof(float) * param.numOutputBoxes * 3 * param.numKeypoints);
