@@ -1,4 +1,14 @@
-
+/**
+ * *****************************************************************************
+ * File name:   ac_memory.h
+ * 
+ * @brief 自定义内存管理类
+ * 
+ * 
+ * Created by Aegon on 2023-04-18
+ * Copyright © 2023 House Targaryen. All rights reserved.
+ * *****************************************************************************
+ */
 #ifndef ACINFER_ULTRA_TRT_MEMORY_H
 #define ACINFER_ULTRA_TRT_MEMORY_H
 
@@ -8,17 +18,24 @@
 
 namespace TRT {
 
-    class TRTMemory {
+    class CudaDeviceGuard {
     public:
+        CudaDeviceGuard(int device_id);
+        ~CudaDeviceGuard();
+    private:
+        int old_device_;
+    };
+    
+    class Memory {
+    public:
+        Memory(int device_id = CURRENT_DEVICE_ID);
+        Memory(void* cpu, size_t cpu_size, void* gpu, size_t gpu_size);
 
-        TRTMemory(int device_id = CURRENT_DEVICE_ID);
-        TRTMemory(void* cpu, size_t cpu_size, void* gpu, size_t gpu_size);
+        ~Memory();
 
-        ~TRTMemory();
-
-        void* gpu(size_t size);
         void* cpu(size_t size);
-
+        void* gpu(size_t size);
+        
         void release_gpu();
         void release_cpu();
         void release_all();
@@ -31,8 +48,8 @@ namespace TRT {
 
         inline int device_id() const{return device_id_;}
 
-        inline void* gpu() const { return gpu_; }
-        inline void* cpu() const { return cpu_; }
+        inline void* cpu() { return cpu_; }
+        inline void* gpu() { return gpu_; }
 
         void reference_data(void* cpu, size_t cpu_size, void* gpu, size_t gpu_size);
 
@@ -48,8 +65,7 @@ namespace TRT {
 
         int device_id_ = 0;
     };
-
+    
 } // namespace TRT
-
 
 #endif // ACINFER_ULTRA_TRT_MEMORY_H

@@ -1,9 +1,10 @@
-
 #include "trt_cuda.h"
+
+#include "tools/ac_utils.h"
 
 namespace iCUDA {
 
-    bool check_runtime(cudaError_t e, const char* call, int line, const char *file){
+    bool check_runtime(cudaError_t e, const char* call, int line, const char* file){
         if (e != cudaSuccess) {
             LOG_ERROR("CUDA Runtime error %s # %s, code = %s [ %d ] in file %s:%d", call, cudaGetErrorString(e), cudaGetErrorName(e), e, file, line);
             return false;
@@ -11,7 +12,7 @@ namespace iCUDA {
         return true;
     }
 
-    bool check_device_id(int device_id){
+    bool check_deviceId(int device_id) {
         int device_count = -1;
         checkCudaRuntime(cudaGetDeviceCount(&device_count));
         if(device_id < 0 || device_id >= device_count){
@@ -21,22 +22,10 @@ namespace iCUDA {
         return true;
     }
 
-    int current_device_id(){
+    int current_deviceId() {
         int device_id = 0;
         checkCudaRuntime(cudaGetDevice(&device_id));
         return device_id;
-    }
-
-    std::string device_capability(int device_id){
-        cudaDeviceProp prop;
-        checkCudaRuntime(cudaGetDeviceProperties(&prop, device_id));
-        return iLog::format("%d.%d", prop.major, prop.minor);
-    }
-
-    std::string device_name(int device_id){
-        cudaDeviceProp prop;
-        checkCudaRuntime(cudaGetDeviceProperties(&prop, device_id));
-        return prop.name;
     }
 
     std::string device_description(int device_id){
@@ -47,7 +36,7 @@ namespace iCUDA {
         checkCudaRuntime(cudaGetDeviceProperties(&prop, device_id));
         checkCudaRuntime(cudaMemGetInfo(&free_mem, &total_mem));
 
-        return iLog::format(
+        return iTools::str_format(
             "[ID %d]<%s>[arch %d.%d][GMEM %.2f GB/%.2f GB]",
             device_id, prop.name, prop.major, prop.minor, 
             free_mem / 1024.0f / 1024.0f / 1024.0f,
@@ -55,12 +44,4 @@ namespace iCUDA {
         );
     }
 
-    AutoDevice::AutoDevice(int device_id){
-        cudaGetDevice(&old_);
-        checkCudaRuntime(cudaSetDevice(device_id));
-    }
-
-    AutoDevice::~AutoDevice(){
-        checkCudaRuntime(cudaSetDevice(old_));
-    }
 } // namespace iCUDA

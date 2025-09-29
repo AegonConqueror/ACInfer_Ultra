@@ -16,13 +16,13 @@
 #include <memory>
 
 #include <types/error.h>
-#include <utils/utils.h>
+#include "tools/ac_utils.h"
 
 typedef struct engine_attr{
     int64_t  n_dims;
     std::vector<int64_t> dims;
 } ac_engine_attr;
-using ac_engine_attrs = std::vector<ac_engine_attr> ;
+using ac_engine_attrs = std::vector<ac_engine_attr>;
 
 typedef int MemorySize;
 using InferenceData = std::vector<std::pair<void *, MemorySize>>;

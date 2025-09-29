@@ -1,23 +1,64 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Linker files
+*.ilk
+
+# Debugger Files
+*.pdb
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# debug information files
+*.dwo
+
 *.iml
 .DS_Store
+
+.vscode
+backup
 build
 cmake/*
 !cmake/.gitkeep
-.vscode
 3rdparty/*
 !3rdparty/.gitkeep
-weights/*
-data/*
-output/*
+lib/*
 bin/*
 onnx/*
-.gitignore
-backup/*
-lib/*
-om/*
-*.sh
-src/demo/*
-engine/*
-*.sh
-python/*
-labels/*
+data/*
+output/*
+src/app/backup/*
+python/generate_calibration/*
+
+**/*.onnx
+**/*.pth
+**/*.engine
+**/*.cache

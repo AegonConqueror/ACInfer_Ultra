@@ -1,24 +1,33 @@
-
+/**
+ * *****************************************************************************
+ * File name:   ac_tensor.h
+ * 
+ * @brief  自定义host、device内存管理
+ * 
+ * 
+ * Created by Aegon on 2023-04-18
+ * Copyright © 2023 House Targaryen. All rights reserved.
+ * *****************************************************************************
+ */
 #ifndef ACINFER_ULTRA_TRT_TENSOR_H
 #define ACINFER_ULTRA_TRT_TENSOR_H
 
-#include <opencv2/opencv.hpp>
+#include <vector>
 
 #include "trt_memory.h"
-
 struct CUstream_st;
-typedef CUstream_st CUDAStreamRaw;
 
 namespace TRT {
-
-    typedef CUDAStreamRaw* CUDAStream;
-    typedef struct{ unsigned short _; } float16;
     
-    // 数据状态
+    typedef CUstream_st CUDAStreamRaw;
+    typedef CUDAStreamRaw* CUDAStream;
+
+    typedef struct{ unsigned short _; } float16;
+
     enum class DataHead : int { 
-        Init   = 0, // 初始
-        Device = 1, // 在GPU上
-        Host   = 2  // 在CPU上
+        Init   = 0,
+        Device = 1, // GPU
+        Host   = 2  // CPU
     };
 
     enum class DataType : int {
@@ -38,22 +47,13 @@ namespace TRT {
 
     class Tensor {
     public:
-        /**
-         * @brief 禁用拷贝构造函数
-         * @note [该类的对象不能通过拷贝方式进行构造]
-         */
-        Tensor(const Tensor& tensor) = delete;
-
-        /**
-         * @brief 禁用拷贝赋值运算符
-         * @note [该类的对象不能通过拷贝方式进行赋值]
-         */
-        Tensor& operator = (const Tensor& tensor) = delete;
-
-        explicit Tensor(DataType dtype = DataType::Float, std::shared_ptr<TRTMemory> data = nullptr, int device_id = CURRENT_DEVICE_ID);
-        explicit Tensor(int n, int c, int h, int w, DataType dtype = DataType::Float, std::shared_ptr<TRTMemory> data = nullptr, int device_id = CURRENT_DEVICE_ID);
-        explicit Tensor(int ndims, const int* dims, DataType dtype = DataType::Float, std::shared_ptr<TRTMemory> data = nullptr, int device_id = CURRENT_DEVICE_ID);
-        explicit Tensor(const std::vector<int>& dims, DataType dtype = DataType::Float, std::shared_ptr<TRTMemory> data = nullptr, int device_id = CURRENT_DEVICE_ID);
+        Tensor(const Tensor& tensor)                = delete; // 禁拷贝
+        Tensor& operator = (const Tensor& tensor)   = delete; // 禁赋值
+        
+        explicit Tensor(DataType dtype = DataType::Float, std::shared_ptr<Memory> data = nullptr, int device_id = CURRENT_DEVICE_ID);
+        explicit Tensor(int N, int C, int H, int W, DataType dtype = DataType::Float, std::shared_ptr<Memory> data = nullptr, int device_id = CURRENT_DEVICE_ID);
+        explicit Tensor(int ndims, const int* dims, DataType dtype = DataType::Float, std::shared_ptr<Memory> data = nullptr, int device_id = CURRENT_DEVICE_ID);
+        explicit Tensor(const std::vector<int>& dims, DataType dtype = DataType::Float, std::shared_ptr<Memory> data = nullptr, int device_id = CURRENT_DEVICE_ID);
 
         ~Tensor();
 
@@ -89,9 +89,6 @@ namespace TRT {
         inline int bytes()                  const { return bytes_; }
         inline int bytes(int start_axis)    const { return count(start_axis) * element_size(); }
 
-        /**
-         * @brief 计算给定索引数组所表示的元素在张量中的偏移量
-         */
         template<typename ... Args>
         int offset(int index, Args ... index_args) const{
             const int index_array[] = {index, index_args...};
@@ -100,9 +97,6 @@ namespace TRT {
         int offset_array(const std::vector<int>& index) const;
         int offset_array(size_t size, const int* index_array) const;
 
-        /**
-         * @brief 重新调整张量的维度和形状，并重新计算张量的步幅（strides）以及相应的内存布局
-         */
         template<typename ... Args>
         Tensor& resize(int dim_size, Args ... dim_size_args){
             const int dim_size_array[] = {dim_size, dim_size_args...};
@@ -144,23 +138,18 @@ namespace TRT {
         CUDAStream  get_stream()        const { return stream_; }
         Tensor&     set_stream(CUDAStream stream, bool owner=false);
 
-        std::shared_ptr<TRTMemory> get_data()             const {return data_;}
-        std::shared_ptr<TRTMemory> get_workspace()        const {return workspace_;}
-        Tensor& set_workspace(std::shared_ptr<TRTMemory> workspace);
+        std::shared_ptr<Memory> get_data()             const {return data_;}
+        std::shared_ptr<Memory> get_workspace()        const {return workspace_;}
+        Tensor& set_workspace(std::shared_ptr<Memory> workspace);
 
-        Tensor& set_mat     (int n, const cv::Mat& image);
-        Tensor& set_norm_mat(int n, const cv::Mat& image, float mean[3], float std[3]);
-        cv::Mat at_mat(int n = 0, int c = 0) { return cv::Mat(height(), width(), CV_32F, cpu<float>(n, c)); }
-        
     private:
-        void setup_data(std::shared_ptr<TRTMemory> data);
-
+        void setup_data(std::shared_ptr<Memory> data);
         Tensor& adjust_memory();
         Tensor& compute_shape_string();
 
     private:
         std::vector<int>    shape_;
-        std::vector<size_t> strides_;                           // 步幅，表示跨越不同维度时所需要跳过的元素数量
+        std::vector<size_t> strides_;
         int                 device_id_      = 0;
         size_t              bytes_          = 0;
         DataHead            head_           = DataHead::Init;
@@ -171,11 +160,10 @@ namespace TRT {
         char shape_string_[100];
         char descriptor_string_[100];
 
-        std::shared_ptr<TRTMemory> data_;
-        std::shared_ptr<TRTMemory> workspace_;
+        std::shared_ptr<Memory> data_;
+        std::shared_ptr<Memory> workspace_;
     };
-    
-    
+
 } // namespace TRT
 
 
