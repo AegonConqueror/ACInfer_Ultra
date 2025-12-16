@@ -22,29 +22,12 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin/")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib/")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib/")
 
-message(STATUS ">>\tuse tensorrt to model inference")
+message(STATUS ">>\tUsing TensorRT for Model Inference... ")
 enable_language(CUDA)
 
-find_package(CUDA QUIET)
-if (CUDA_FOUND)
-    message(STATUS ">>\t\tCUDA version: 11.8")
-else()
-    message(FATAL_ERROR "Cannot find CUDA")
-endif()
-
-find_package(TensorRT QUIET)
-if (TensorRT_FOUND)
-    message(STATUS ">>\t\tTensorRT version: ${TensorRT_VERSION_STRING}")
-else()
-    message(FATAL_ERROR "Cannot find TensorRT")
-endif()
-
-find_package(OpenCV QUIET)
-if (OpenCV_FOUND)
-    message(STATUS ">>\t\tOpenCV version: ${OpenCV_VERSION}")
-else()
-    message(FATAL_ERROR "Cannot find OpenCV")
-endif()
+find_package(CUDA REQUIRED)
+find_package(TensorRT REQUIRED)
+find_package(OpenCV REQUIRED)
 
 include_directories(
     ${PROJECT_SOURCE_DIR}/src

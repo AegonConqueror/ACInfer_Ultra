@@ -46,11 +46,11 @@
 .vscode
 backup
 build
-cmake/*
-!cmake/.gitkeep
+
 3rdparty/*
 !3rdparty/.gitkeep
 lib/*
+plugin/*
 bin/*
 onnx/*
 data/*
